@@ -6,8 +6,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "validate": "node scripts/validate-catalog.mjs",
-    "pack": "node scripts/pack-plugin.mjs"
+    "validate": "node scripts/validate-catalog.mjs"
   },
   "devDependencies": {
     "ajv": "^8.17.1",

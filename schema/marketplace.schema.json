@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/xxsLuna/DeepSeek-Harness-Desktop-Marketplace/schema/marketplace.schema.json",
+  "title": "Agent plugin marketplace",
+  "description": "Editor-time help for .claude-plugin/marketplace.json. NOT the gate: what may actually be listed is decided by the desktop app's own packages/market/lib/catalog.js, which scripts/validate-catalog.mjs calls. This file exists so an editor can complete a row, and CI checks the two still agree.",
+  "type": "object",
+  "required": ["name", "owner", "plugins"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "name": {
+      "type": "string",
+      "description": "The marketplace's own name, shown beside a plugin as who listed it.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "description": { "type": "string" },
+    "version": {
+      "description": "The document's own version. A number here is the retired index.json format and is refused outright.",
+      "type": "string"
+    },
+    "owner": {
+      "description": "Who publishes the catalog. A bare string is accepted and read as the name.",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "required": ["name"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "email": { "type": "string" },
+            "url": { "type": "string", "pattern": "^https://" }
+          }
+        }
+      ]
+    },
+    "metadata": { "type": "object" },
+    "renames": {
+      "description": "Tombstones: old name -> current name, so an installed plugin follows a rename.",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "plugins": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/plugin" }
+    }
+  },
+  "$defs": {
+    "person": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "email": { "type": "string" },
+            "url": { "type": "string", "pattern": "^https://" }
+          }
+        }
+      ]
+    },
+    "plugin": {
+      "type": "object",
+      "required": ["name", "source"],
+      "properties": {
+        "name": {
+          "description": "The install key, not a label: it names the directory the plugin lands in.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "displayName": { "type": "string" },
+        "description": { "type": "string" },
+        "version": { "type": "string" },
+        "author": { "$ref": "#/$defs/person" },
+        "homepage": { "type": "string", "pattern": "^https://" },
+        "repository": { "type": "string" },
+        "license": { "type": "string" },
+        "category": { "type": "string" },
+        "keywords": { "type": "array", "items": { "type": "string" } },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "metadata": {
+          "description": "Free-form. This app reads `kind` as a hint for the install confirmation; the installer verifies it against the downloaded files.",
+          "type": "object",
+          "properties": {
+            "kind": { "enum": ["claude", "dsh"] }
+          }
+        },
+        "source": { "$ref": "#/$defs/source" }
+      }
+    },
+    "source": {
+      "description": "Where the plugin is fetched from. Only the four types the app can pin are described here; npm, command and a relative path are valid in the wider format and are refused by this app, so a row using one would validate against a looser schema and still never install.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["source", "repo"],
+          "additionalProperties": false,
+          "properties": {
+            "source": { "const": "github" },
+            "repo": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$" },
+            "ref": { "type": "string" },
+            "sha": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$|^[0-9a-fA-F]{64}$" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["source", "url"],
+          "additionalProperties": false,
+          "properties": {
+            "source": { "const": "url" },
+            "url": { "type": "string", "pattern": "^https://.*\\.git$" },
+            "ref": { "type": "string" },
+            "sha": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$|^[0-9a-fA-F]{64}$" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["source", "path"],
+          "additionalProperties": false,
+          "properties": {
+            "source": { "const": "git-subdir" },
+            "repo": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$" },
+            "url": { "type": "string", "pattern": "^https://.*\\.git$" },
+            "path": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}$"
+            },
+            "ref": { "type": "string" },
+            "sha": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$|^[0-9a-fA-F]{64}$" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["source", "url", "sha256"],
+          "additionalProperties": false,
+          "properties": {
+            "source": { "const": "archive" },
+            "url": { "type": "string", "pattern": "^https://" },
+            "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" }
+          }
+        }
+      ]
+    }
+  }
+}

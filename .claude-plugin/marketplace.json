@@ -1,0 +1,50 @@
+{
+  "$schema": "../schema/marketplace.schema.json",
+  "name": "deepseek-harness-desktop",
+  "description": "Curated plugins for DeepSeek Harness Desktop. Two kinds are listed side by side: Claude-format plugins, which the harness reads as skills, and dsh-format plugins, which it loads as code.",
+  "owner": {
+    "name": "xxsLuna",
+    "url": "https://github.com/xxsLuna"
+  },
+  "metadata": {
+    "note": "The app reads this file directly out of the repository. There is no site build and no release step between an edit here and a user seeing it."
+  },
+  "plugins": [
+    {
+      "name": "desktop-plugin-authoring",
+      "displayName": "Plugin Authoring",
+      "description": "How to write, list and get a plugin into this marketplace: the two formats, what each can reach, and the rules CI enforces.",
+      "version": "0.1.0",
+      "author": { "name": "xxsLuna", "url": "https://github.com/xxsLuna" },
+      "homepage": "https://github.com/xxsLuna/DeepSeek-Harness-Desktop-Marketplace",
+      "license": "MIT",
+      "category": "development",
+      "keywords": ["plugin", "authoring", "marketplace"],
+      "metadata": { "kind": "claude" },
+      "source": {
+        "source": "git-subdir",
+        "repo": "xxsLuna/DeepSeek-Harness-Desktop-Marketplace",
+        "path": "plugins/desktop-plugin-authoring",
+        "ref": "main"
+      }
+    },
+    {
+      "name": "dsh-plugin-background-color",
+      "displayName": "Background Colour",
+      "description": "Repaint the window frame, sidebar and conversation view with one colour per light and dark scheme.",
+      "version": "0.1.0",
+      "author": { "name": "xxsLuna", "url": "https://github.com/xxsLuna" },
+      "homepage": "https://github.com/xxsLuna/DeepSeek-Harness-Desktop-Marketplace",
+      "license": "MIT",
+      "category": "appearance",
+      "keywords": ["theme", "colour", "appearance"],
+      "metadata": { "kind": "dsh" },
+      "source": {
+        "source": "git-subdir",
+        "repo": "xxsLuna/DeepSeek-Harness-Desktop-Marketplace",
+        "path": "plugins/dsh-plugin-background-color",
+        "ref": "main"
+      }
+    }
+  ]
+}

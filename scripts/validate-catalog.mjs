@@ -7,53 +7,56 @@
 // It does not contain a copy of the rules. Every decision the app makes about a
 // plugin is imported from the app's own `packages/market/` and called here:
 //
-//   fetch.js     isAllowedSource, parseCatalog, parseIntegrity, fetchTarball
-//   registry.js  isPluginName, isPluginVersion  (what may be written into the
-//                profile manifest, and therefore what may be installed at all)
-//   tar.js       tarballFiles, readTarball      (the app's own reader, not
-//                system tar — see unpack() below)
+//   catalog.js   parseCatalog, MARKETPLACE_FILE, SUPPORTED_SOURCES
+//                (the document's shape, and which source types can be offered)
+//   kind.js      classifyPlugin  (what a downloaded tree IS, and the gate each
+//                kind has to pass — the same call the installer makes)
+//   git.js       resolveGitSource, fetchGit  (how a git source is reduced to a
+//                URL/ref/sha, and the clone itself)
+//   fetch.js     isAllowedSource, fetchTarball
+//   registry.js  isPluginName    (what may be written into the profile manifest)
 //
 // A second implementation would drift, and it can only drift toward passing: it
-// would accept a row the installer refuses (a wasted release, discovered by
-// users) or, worse, accept a digest form the installer treats differently.
-// There is no version of "keep the two in sync by hand" that survives a year.
-// So the app is the single authority, this repo owns only what the app cannot
-// see from a catalog — what is INSIDE the tarball, and whether the row agrees
-// with it — and a change to the app's rules shows up here as a red check on the
-// next pull request.
+// would accept a row the installer refuses (a wasted listing, discovered by
+// users) or, worse, accept a package the installer treats differently. There is
+// no version of "keep the two in sync by hand" that survives a year. So the app
+// is the single authority, this repo owns only what the app cannot see from a
+// catalog — what is INSIDE the plugin, and whether the row agrees with it — and
+// a change to the app's rules shows up here as a red check on the next pull
+// request.
 //
 // Exit code 1 on any failure. Every check prints a line either way, because a
 // gate that only speaks up when it fails cannot be audited.
-import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 /**
- * The URL this repository is served at. Asserted against the app's own
- * DEFAULT_CATALOG rather than trusted: renaming this repo, or changing the
- * Pages path, silently orphans every installed client, and the app is the side
- * that cannot be fixed by a commit here.
+ * This repository, as a catalog row spells it.
+ *
+ * Rows pointing here are the normal case and are allowed to track a branch;
+ * rows pointing anywhere else must pin a `sha`. The asymmetry is not a double
+ * standard — whoever can move this repository's branch can also rewrite the row
+ * that points at it, so a pin here would be ceremony. A third-party row is the
+ * opposite: the row is reviewed once and the branch it names can move
+ * afterwards, which is precisely the thing a review cannot catch.
  */
-const PUBLISHED_AT = 'https://xxsluna.github.io/DeepSeek-Harness-Desktop-Marketplace/index.json'
+const THIS_REPO = 'xxsLuna/DeepSeek-Harness-Desktop-Marketplace'
+
+/** Where the catalog document lives, checked against the app's own constant. */
+const CATALOG_PATH = ['.claude-plugin', 'marketplace.json']
 
 /**
- * The bootstrap digest a row carries before its release exists — 64 zero bytes,
- * which is shape-valid so `parseCatalog` reports the row as good and the
- * failure below can name the real problem instead of appearing as a generic
- * `bad-integrity` drop.
- */
-const PLACEHOLDER_INTEGRITY = `sha512-${Buffer.alloc(64).toString('base64')}`
-
-/**
- * Fields a patch row may carry, as repo policy. The Loader itself also honours
- * `isolate` and `intercept`; both re-label service realms for rows other than
- * their own, so a third-party plugin does not get them.
+ * Fields a dsh plugin's patch row may carry, as repo policy. The Loader itself
+ * also honours `isolate` and `intercept`; both re-label service realms for rows
+ * other than their own, so a third-party plugin does not get them.
  */
 const ALLOWED_ROW_FIELDS = new Set(['id', 'name', 'config', 'group', 'disabled', 'inject'])
 
 const failures = []
 const notes = []
+const scratch = []
 
 /**
  * Record one assertion.
@@ -131,91 +134,72 @@ async function marketModule(file, required) {
   process.exit(2)
 }
 
+const catalogModule = await marketModule('catalog.js', true)
+const kindModule = await marketModule('kind.js', true)
 const fetchModule = await marketModule('fetch.js', true)
+const gitModule = await marketModule('git.js', false)
 const registry = await marketModule('registry.js', false)
-const tar = await marketModule('tar.js', false)
 
 console.log(`validate-catalog: driving ${join(desktopRoot, 'packages', 'market', 'lib')}`)
-console.log(`  fetch.js     ${Object.keys(fetchModule).length} exports`)
-console.log(`  registry.js  ${registry === undefined ? 'ABSENT' : `${Object.keys(registry).length} exports`}`)
-console.log(`  tar.js       ${tar === undefined ? 'ABSENT' : `${Object.keys(tar).length} exports`}`)
+for (const [name, mod] of [
+  ['catalog.js', catalogModule], ['kind.js', kindModule], ['fetch.js', fetchModule],
+  ['git.js', gitModule], ['registry.js', registry],
+]) {
+  console.log(`  ${name.padEnd(12)} ${mod === undefined ? 'ABSENT' : `${Object.keys(mod).length} exports`}`)
+}
 console.log('')
 
 // ---------------------------------------------------------------------------
 // 1. The app and this repo still agree on where the catalog lives.
 // ---------------------------------------------------------------------------
 console.log('catalog source')
+// Asserted against the app's own constant rather than trusted: moving this file
+// silently orphans every installed client, and the app is the side that cannot
+// be fixed by a commit here.
 check(
-  fetchModule.isAllowedSource(PUBLISHED_AT),
-  `the app accepts ${PUBLISHED_AT} as a catalog source`,
-  `DEFAULT_CATALOG is ${String(fetchModule.DEFAULT_CATALOG)}`,
+  catalogModule.MARKETPLACE_FILE === CATALOG_PATH.join('/'),
+  `the app looks for ${CATALOG_PATH.join('/')}`,
+  String(catalogModule.MARKETPLACE_FILE),
 )
-// Same policy from the other side: the app must refuse a plaintext spelling of
-// this repo. Asserted because it is the check that would catch a fetch.js edit
-// loosening the scheme rule.
+const defaultCatalog = String(fetchModule.DEFAULT_CATALOG)
 check(
-  !fetchModule.isAllowedSource(PUBLISHED_AT.replace('https://', 'http://')),
-  'the app refuses the http:// spelling of the same path',
+  fetchModule.isAllowedSource(defaultCatalog),
+  'the app accepts its own default catalog as a source',
+  defaultCatalog,
+)
+check(
+  defaultCatalog.includes(THIS_REPO) && defaultCatalog.endsWith(CATALOG_PATH.join('/')),
+  `the app's default catalog is this repository's ${CATALOG_PATH.join('/')}`,
+  defaultCatalog,
+)
+// Same policy from the other side: the app must refuse a plaintext spelling.
+// Asserted because it is the check that would catch a fetch.js edit loosening
+// the scheme rule.
+check(
+  !fetchModule.isAllowedSource(defaultCatalog.replace('https://', 'http://')),
+  'the app refuses the http:// spelling of the same URL',
 )
 console.log('')
 
 // ---------------------------------------------------------------------------
 // 2. The envelope, through parseCatalog — the app's own shape rule.
 // ---------------------------------------------------------------------------
-const catalogPath = join(repoRoot, 'index.json')
+const catalogPath = join(repoRoot, ...CATALOG_PATH)
 const catalogText = readFileSync(catalogPath, 'utf8')
-const catalog = fetchModule.parseCatalog(catalogText)
+const catalog = catalogModule.parseCatalog(catalogText)
 const sourceRows = JSON.parse(catalogText).plugins
 
-console.log(`envelope (${catalogPath})`)
-check(catalog.version === 1, 'parseCatalog accepted the envelope')
-check(catalog.dropped.length === 0, 'no row was dropped', JSON.stringify(catalog.dropped))
+console.log(`envelope (${CATALOG_PATH.join('/')})`)
+check(typeof catalog.name === 'string' && catalog.name.length > 0, 'parseCatalog accepted the envelope')
 // parseCatalog drops rather than throws, so a row count that shrank is the only
 // evidence a submission was silently ignored.
+check(catalog.dropped.length === 0, 'no row was dropped', JSON.stringify(catalog.dropped))
 check(
   catalog.plugins.length === sourceRows.length,
   `all ${String(sourceRows.length)} row(s) survived validation`,
   `${String(catalog.plugins.length)} of ${String(sourceRows.length)}`,
 )
 console.log('')
-
-/**
- * Read a tarball into `path -> bytes`, with `package/` already stripped.
- *
- * Uses the app's own `tar.js` when it exists, and that is the point: it is a
- * dependency-free ustar reader that refuses rather than repairs (absolute
- * paths, symlinks, traversal, gzip bombs, a missing end-of-archive marker), and
- * a tarball the gate accepted through system tar but the installer would refuse
- * is a release that fails at the user. System tar is a fallback that says so.
- * @param {Buffer} bytes - the .tgz bytes.
- * @returns {Promise<Map<string, Buffer>> | Map<string, Buffer>} the file table.
- */
-async function tarballFiles(bytes) {
-  if (tar !== undefined && typeof tar.tarballFiles === 'function') return tar.tarballFiles(bytes)
-  note(
-    'the app ships no packages/market/lib/tar.js with a tarballFiles export'
-      + ` (${tar === undefined ? 'no tar.js' : Object.keys(tar).join(', ')}), so extraction here is system tar,`
-      + ' not the installer\'s own reader; its path and bomb refusals are UNCHECKED',
-  )
-  const { spawnSync } = await import('node:child_process')
-  const { mkdtempSync, readdirSync, statSync, writeFileSync } = await import('node:fs')
-  const { tmpdir } = await import('node:os')
-  const work = mkdtempSync(join(tmpdir(), 'market-gate-'))
-  writeFileSync(join(work, 'a.tgz'), bytes)
-  const result = spawnSync('tar', ['-xzf', 'a.tgz'], { cwd: work, stdio: 'inherit' })
-  if (result.status !== 0) throw new Error(`tar exited ${String(result.status)}`)
-  /** @type {Map<string, Buffer>} */
-  const files = new Map()
-  const walk = (dir, prefix) => {
-    for (const name of readdirSync(dir)) {
-      const full = join(dir, name)
-      if (statSync(full).isDirectory()) walk(full, `${prefix}${name}/`)
-      else files.set(`${prefix}${name}`, readFileSync(full))
-    }
-  }
-  walk(join(work, 'package'), '')
-  return files
-}
 
 /**
  * Read the single-row patch layer without a YAML parser of our own.
@@ -226,125 +210,205 @@ async function tarballFiles(bytes) {
  * that dialect is deliberately NOT registered: a marketplace plugin's row must
  * not carry an expression the harness would evaluate at activation, and an
  * unregistered tag makes js-yaml throw instead of passing it on.
- * @param {Buffer} bytes - the patch file's contents.
+ * @param {string} text - the patch file's contents.
  * @param {string} filename - for the error message.
  * @returns {Promise<unknown>} the parsed patch layer.
  */
-async function readPatch(bytes, filename) {
+async function readPatch(text, filename) {
   // js-yaml v4 is CJS: `default` is the whole module and is what a
   // bundler-free Node gives reliably.
   const imported = await import('js-yaml')
   const yaml = imported.default ?? imported
-  return yaml.load(bytes.toString('utf8'), { schema: yaml.JSON_SCHEMA, filename })
+  return yaml.load(text, { schema: yaml.JSON_SCHEMA, filename })
+}
+
+/**
+ * Every file under a directory, as posix paths relative to it.
+ * @param {string} root - directory to walk.
+ * @returns {string[]} the paths.
+ */
+function filesUnder(root) {
+  /** @type {string[]} */
+  const out = []
+  const walk = (dir, prefix) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === '.git') continue
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) walk(full, `${prefix}${entry.name}/`)
+      else out.push(`${prefix}${entry.name}`)
+    }
+  }
+  walk(root, '')
+  return out
+}
+
+/**
+ * Put a row's plugin somewhere the gate can read it, the way the app would.
+ *
+ * A `git-subdir` row pointing at this repository is read out of the WORKING
+ * TREE instead of being cloned, and that is the point of the whole gate: on a
+ * pull request the submitted commit is not on the branch the row names yet, so
+ * cloning would check the code already on `main` and pass a submission it never
+ * looked at.
+ * @param {any} row - the parsed catalog row.
+ * @returns {Promise<{root: string} | undefined>} where the plugin's files are,
+ * or undefined when they could not be fetched.
+ */
+async function materialise(row) {
+  const source = row.source
+  if (source.source === 'git-subdir' && source.repo === THIS_REPO) {
+    const local = join(repoRoot, ...source.path.split('/'))
+    if (!check(existsSync(local) && statSync(local).isDirectory(), `${source.path} is a directory in this repository`)) {
+      return undefined
+    }
+    return { root: local }
+  }
+  if (offline) {
+    note(`--offline: not fetching ${row.name}, so its contents are UNCHECKED`)
+    return undefined
+  }
+  if (source.source === 'archive') {
+    const tar = await marketModule('tar.js', false)
+    if (tar === undefined) {
+      note('the app ships no tar.js, so an archive cannot be opened with the reader the installer uses')
+      return undefined
+    }
+    // fetchTarball returns bytes ONLY after they verify, so reaching the next
+    // line is itself the integrity assertion.
+    const sri = `sha256-${Buffer.from(source.sha256, 'hex').toString('base64')}`
+    const bytes = Buffer.from(await fetchModule.fetchTarball(source.url, sri))
+    check(true, `${source.url} downloaded and matched its sha256`)
+    const root = mkdtempSync(join(tmpdir(), 'market-gate-'))
+    scratch.push(root)
+    tar.readTarball(bytes, root, { stripPrefix: 'auto' })
+    return { root }
+  }
+  if (gitModule === undefined) {
+    note(`the app ships no git.js, so ${row.name} cannot be fetched the way the installer would`)
+    return undefined
+  }
+  const holder = mkdtempSync(join(tmpdir(), 'market-gate-'))
+  scratch.push(holder)
+  const got = await gitModule.fetchGit(source, join(holder, 'tree'))
+  check(true, `cloned at ${got.sha}`)
+  return { root: join(holder, 'tree') }
 }
 
 // ---------------------------------------------------------------------------
-// 3. Per row: identity, the bytes, and what is inside them.
+// 3. Per row: identity, pinning, and what is actually in the plugin.
 // ---------------------------------------------------------------------------
 for (const row of catalog.plugins) {
-  console.log(`row ${row.id}`)
+  console.log(`row ${row.name}`)
 
-  // `name` is the npm package name, not a label. The installer looks a listing
-  // up by it (`view.plugins.find((p) => p.name === wanted)`), asserts the
-  // tarball's own manifest name equals it, and writes the package to
-  // `profiles/desktop/node_modules/<name>`. A display name here is a plugin
-  // that cannot be installed.
-  //
-  // Both predicates come from the app's registry.js, and both catch things
-  // parseCatalog does not: `isPluginName` is lowercase-only and refuses the
-  // reserved names, while SAFE_ID permits uppercase; `isPluginVersion` demands
-  // one concrete semver release, and parseCatalog does not parse the version at
-  // all — so a row with a range passes the catalog and 422s at install.
+  // The name is the install key, not a label: it names the directory the plugin
+  // lands in, and for a dsh plugin it is written into the profile manifest.
   if (registry === undefined) {
-    note('the app ships no packages/market/lib/registry.js, so the installable-name and exact-version rules are UNCHECKED')
+    note('the app ships no registry.js, so the installable-name rule is UNCHECKED')
   } else {
-    check(registry.isPluginName(row.name), 'name is an installable package name (registry.isPluginName)', JSON.stringify(row.name))
-    check(registry.isPluginVersion(row.version), 'version is one concrete semver release (registry.isPluginVersion)', JSON.stringify(row.version))
+    check(registry.isPluginName(row.name), 'name is an installable package name', JSON.stringify(row.name))
   }
-  // Repo convention, not an app rule: `id` is unused by the installer, so
-  // letting it differ from `name` gives two identities for one plugin and
-  // guarantees they eventually disagree.
-  check(row.id === row.name, 'id equals name', `${row.id} vs ${row.name}`)
+  check(
+    catalogModule.SUPPORTED_SOURCES.includes(row.source.source),
+    `source type ${row.source.source} is one the app can install from`,
+    catalogModule.SUPPORTED_SOURCES.join(', '),
+  )
 
-  // Named separately from parseCatalog's own digest check so the message says
-  // "sha512" rather than "dropped".
-  const digest = fetchModule.parseIntegrity(row.integrity)
-  check(digest.algorithm === 'sha512', 'integrity is sha512', digest.algorithm)
-
-  const pluginDir = join(repoRoot, 'plugins', row.name)
-  if (check(existsSync(pluginDir), `plugins/${row.name}/ exists in this repo`)) {
-    const source = JSON.parse(readFileSync(join(pluginDir, 'package.json'), 'utf8'))
-    check(source.name === row.name, `plugins/${row.name}/package.json name is the row name`, String(source.name))
+  // A row this repository does not own can have its branch moved after review.
+  const foreign = row.source.source !== 'archive' && row.source.repo !== THIS_REPO
+  if (foreign) {
     check(
-      source.version === row.version,
-      `plugins/${row.name}/package.json version matches the row`,
-      `${String(source.version)} vs ${row.version}`,
+      typeof row.source.sha === 'string',
+      `${row.name} points outside this repository, so it must pin a sha`,
+      JSON.stringify(row.source.ref ?? null),
+    )
+  }
+  if (gitModule !== undefined && row.source.source !== 'archive') {
+    // Not a re-check of the catalog rule: the transport applies its own, and a
+    // row the catalog offers but the transport refuses is a listing that fails
+    // only at install time.
+    try {
+      const resolved = gitModule.resolveGitSource(row.source)
+      const where = resolved.path === undefined ? '' : ` (${resolved.path})`
+      check(true, `the transport resolves it to ${resolved.url}${where}`)
+    } catch (error) {
+      check(false, 'the git transport accepts this source', String(error))
+    }
+  }
+
+  // Repo convention: the row's `metadata.kind` is what the app shows in the
+  // install confirmation before anything is downloaded, so it has to be there
+  // and it has to be right — `classifyPlugin` below is what decides "right".
+  const hinted = row.metadata?.kind
+  check(hinted === 'claude' || hinted === 'dsh', 'metadata.kind is declared', JSON.stringify(hinted ?? null))
+
+  let located
+  try {
+    located = await materialise(row)
+  } catch (error) {
+    check(false, `${row.name} could be fetched the way the app fetches it`, String(error))
+    console.log('')
+    continue
+  }
+  if (located === undefined) {
+    console.log('')
+    continue
+  }
+
+  // The installer's own decision, made here instead of at a user's machine.
+  let kind
+  try {
+    kind = kindModule.classifyPlugin(located.root, { name: row.name, version: row.version })
+    check(true, `the app classifies it as a ${kind.kind} plugin, version ${kind.version}`)
+  } catch (error) {
+    check(false, `${row.name} passes the installer's kind gate`, String(error))
+    console.log('')
+    continue
+  }
+  check(kind.kind === hinted, 'the declared kind is the kind it actually is', `${String(hinted)} vs ${kind.kind}`)
+  if (row.version !== undefined) {
+    check(
+      kind.version === row.version,
+      "the plugin's own version equals the row version",
+      `${kind.version} vs ${row.version}`,
     )
   }
 
-  if (row.integrity === PLACEHOLDER_INTEGRITY) {
-    // Deliberately a failure, not a skip. The served catalog names bytes that
-    // cannot be verified, which is the exact state this gate exists to keep off
-    // the default branch. The fix is a release, not an exemption.
-    check(
-      false,
-      `${row.name} carries a real integrity digest`,
-      'the bootstrap placeholder — run the release-plugin workflow, which computes the digest and rewrites this row',
-    )
+  const files = filesUnder(located.root)
+
+  if (kind.kind === 'claude') {
+    // A Claude plugin that publishes nothing installs cleanly and does nothing,
+    // which is the failure this catches: the row promised a capability.
+    const skills = files.filter((path) => /^skills\/[^/]+\/SKILL\.md$/.test(path))
+    check(skills.length > 0, 'it ships at least one skills/<name>/SKILL.md', files.slice(0, 10).join(', '))
+    for (const path of skills) {
+      const text = readFileSync(join(located.root, ...path.split('/')), 'utf8')
+      const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)
+      if (!check(frontmatter !== null, `${path} opens with YAML frontmatter`)) continue
+      const body = frontmatter[1]
+      check(/^name:\s*\S/m.test(body), `${path} declares a name`)
+      check(/^description:\s*\S/m.test(body), `${path} declares a description`)
+      // Withheld by the app rather than published with the restriction dropped,
+      // so a plugin whose only skill declares it installs and does nothing.
+      check(
+        !/^allowed-tools:/m.test(body),
+        `${path} declares no allowed-tools (the app cannot enforce one, so it withholds the skill)`,
+      )
+    }
+    // Named rather than silently accepted: these install and do nothing.
+    for (const ignored of ['agents', 'hooks']) {
+      if (files.some((path) => path.startsWith(`${ignored}/`))) {
+        note(`${row.name} ships ${ignored}/, which this app ignores — say so in its description`)
+      }
+    }
+    if (files.includes('.mcp.json')) note(`${row.name} ships .mcp.json, which this app ignores`)
     console.log('')
     continue
   }
 
-  if (offline) {
-    note(`--offline: not downloading ${row.tarball}, so integrity and manifest are UNCHECKED for ${row.name}`)
-    console.log('')
-    continue
-  }
-
-  // fetchTarball parses the digest first, follows redirects by hand re-checking
-  // the scheme on every hop, caps the body as it arrives, and returns bytes
-  // ONLY after they verify — so reaching the next line is itself the integrity
-  // assertion, and no caller of it can hold unverified bytes.
-  let bytes
-  try {
-    bytes = Buffer.from(await fetchModule.fetchTarball(row.tarball, row.integrity))
-    check(true, `${row.tarball} downloaded and matched its ${digest.algorithm}`)
-  } catch (error) {
-    check(false, `${row.tarball} downloaded and matched its ${digest.algorithm}`, String(error))
-    console.log('')
-    continue
-  }
-  // Printed so a maintainer fixing a mismatch has the value without re-running.
-  console.log(`  note  ${String(bytes.byteLength)} bytes, sha512-${createHash('sha512').update(bytes).digest('base64')}`)
-
-  let files
-  try {
-    files = await tarballFiles(bytes)
-  } catch (error) {
-    check(false, 'the tarball is a readable npm tarball', String(error))
-    console.log('')
-    continue
-  }
-
-  const manifestBytes = files.get('package.json')
-  if (!check(manifestBytes !== undefined, 'the tarball contains package.json')) {
-    console.log('')
-    continue
-  }
-  const manifest = JSON.parse(manifestBytes.toString('utf8'))
-
-  // The installer's own two equality checks, run here instead of at a user's
-  // machine: "the package is X, not Y as the catalog said".
-  check(manifest.name === row.name, 'the tarball manifest name equals the row name', String(manifest.name))
-  check(manifest.version === row.version, 'the tarball manifest version equals the row version', String(manifest.version))
-
-  // The no-dependencies rule, and the installer refuses on exactly this. A
-  // runtime dependency would have to be fetched and resolved on the user's
-  // machine at install time — but the packaged app ships no package manager, so
-  // it would resolve to nothing at load, and no digest in this catalog would
-  // have covered it either way.
-  const runtimeDeps = Object.keys(manifest.dependencies ?? {})
-  check(runtimeDeps.length === 0, 'the manifest declares no runtime dependencies', runtimeDeps.join(', '))
+  // ------------------------------------------------------------------
+  // dsh: the manifest, the browser half, and the patch layer.
+  // ------------------------------------------------------------------
+  const manifest = JSON.parse(readFileSync(join(located.root, 'package.json'), 'utf8'))
   check(
     Object.keys(manifest.optionalDependencies ?? {}).length === 0,
     'the manifest declares no optionalDependencies',
@@ -376,17 +440,17 @@ for (const row of catalog.plugins) {
     return undefined
   }
   /**
-   * Whether an export target is actually in the tarball.
+   * Whether an export target is actually present.
    * @param {string | undefined} target - the relative target.
    * @returns {boolean} whether the file shipped.
    */
-  const shipped = (target) => typeof target === 'string' && files.has(target.replace(/^\.\//, ''))
+  const shipped = (target) => typeof target === 'string' && files.includes(target.replace(/^\.\//, ''))
 
   // The node half is what the Loader imports for the row; without it the row
   // cannot mount at all, however complete the browser half is.
   const nodeEntry = exportTarget('.')
   check(typeof nodeEntry === 'string', 'exports["."] names a node entry', JSON.stringify(exportsField?.['.']))
-  check(shipped(nodeEntry), `${String(nodeEntry)} is in the tarball (check the manifest's "files")`)
+  check(shipped(nodeEntry), `${String(nodeEntry)} is present`)
   check(exportsIsObject && exportsField['./package.json'] === './package.json', 'exports["./package.json"] is declared')
 
   const clientDecl = manifest.dsh?.client
@@ -395,13 +459,20 @@ for (const row of catalog.plugins) {
   } else {
     check(clientDecl.platform === 'web', 'dsh.client.platform is the literal "web"', JSON.stringify(clientDecl.platform))
     const clientEntry = exportTarget('./client')
-    check(typeof clientEntry === 'string', 'exports["./client"] names a browser bundle', JSON.stringify(exportsField?.['./client']))
-    if (check(shipped(clientEntry), `${String(clientEntry)} is in the tarball`)) {
-      const bundle = files.get(String(clientEntry).replace(/^\.\//, '')).toString('utf8')
+    check(
+      typeof clientEntry === 'string',
+      'exports["./client"] names a browser bundle',
+      JSON.stringify(exportsField?.['./client']),
+    )
+    if (check(shipped(clientEntry), `${String(clientEntry)} is present`)) {
+      const bundle = readFileSync(join(located.root, ...String(clientEntry).replace(/^\.\//, '').split('/')), 'utf8')
       // The bundle is fetched with a classic <script src>, and the module system
       // then asserts a factory was registered under this exact id. An ES module
       // defers past that assertion; a mismatched id fails it.
-      check(bundle.includes('window.__ModuleLoader__.load('), 'the client bundle registers through window.__ModuleLoader__.load')
+      check(
+        bundle.includes('window.__ModuleLoader__.load('),
+        'the client bundle registers through window.__ModuleLoader__.load',
+      )
       check(
         bundle.includes(JSON.stringify(manifest.name)),
         `the client bundle's registered id is the package name (${String(manifest.name)})`,
@@ -411,36 +482,15 @@ for (const row of catalog.plugins) {
         'the client bundle has no top-level ESM syntax (it must be a classic script)',
       )
     }
-    if (Array.isArray(clientDecl.inject)) {
-      // The manifest field holds PACKAGE names; the bundle's own
-      // `export const inject` holds cordis SERVICE names. A bare service name
-      // here is the usual way to get that backwards, and it resolves to nothing
-      // rather than failing.
-      const bare = clientDecl.inject.filter((entry) => !String(entry).includes('/'))
-      check(bare.length === 0, 'dsh.client.inject holds package names, not service names', bare.join(', '))
-    }
   }
 
-  // ------------------------------------------------------------------
-  // The patch layer: one row, named for the package.
-  // ------------------------------------------------------------------
-  const declaredPatch = manifest.dsh?.bundle?.patch
-  if (!check(typeof declaredPatch === 'string', 'dsh.bundle.patch is declared', JSON.stringify(declaredPatch))) {
-    console.log('')
-    continue
-  }
-  // Resolved the way the installer resolves it, and the way loadProfile will.
-  const patchKey = declaredPatch.replace(/^\.\//, '')
-  if (!check(files.has(patchKey), `${declaredPatch} is in the tarball`)) {
-    console.log('')
-    continue
-  }
-
+  // Resolved the way classifyPlugin resolved it, and the way loadProfile will.
+  const patchKey = manifest.dsh.bundle.patch.replace(/^\.\//, '')
   let patch
   try {
-    patch = await readPatch(files.get(patchKey), patchKey)
+    patch = await readPatch(readFileSync(join(located.root, ...patchKey.split('/')), 'utf8'), patchKey)
   } catch (error) {
-    check(false, `${declaredPatch} parses as plain YAML (no !!js expressions)`, String(error))
+    check(false, `${patchKey} parses as plain YAML (no !!js expressions)`, String(error))
     console.log('')
     continue
   }
@@ -448,7 +498,8 @@ for (const row of catalog.plugins) {
   const layer = Array.isArray(patch) ? patch : []
   check(layer.length === 1, 'the patch layer holds exactly one patch', String(layer.length))
   check(
-    layer.every((entry) => entry !== null && typeof entry === 'object' && Object.keys(entry).length === 1 && 'insert' in entry),
+    layer.every((entry) => entry !== null && typeof entry === 'object'
+      && Object.keys(entry).length === 1 && 'insert' in entry),
     'the patch layer touches no row it did not insert',
   )
 
@@ -479,17 +530,23 @@ for (const row of catalog.plugins) {
 // ---------------------------------------------------------------------------
 // 4. The editor-time schema, checked against the file it advertises.
 // ---------------------------------------------------------------------------
-console.log('schema/index.schema.json')
+console.log('schema/marketplace.schema.json')
 // `ajv/dist/2020` and not the package root: the root export only knows
 // draft-07, and compiling a 2020-12 document against it fails with
 // `no schema with key or ref "https://json-schema.org/draft/2020-12/schema"`,
 // which reads like a network problem and is not one.
 const { default: Ajv } = await import('ajv/dist/2020.js')
-const schema = JSON.parse(readFileSync(join(repoRoot, 'schema', 'index.schema.json'), 'utf8'))
+const schema = JSON.parse(readFileSync(join(repoRoot, 'schema', 'marketplace.schema.json'), 'utf8'))
 const ajv = new Ajv({ allErrors: true, strict: false })
 const validate = ajv.compile(schema)
-check(validate(JSON.parse(catalogText)), 'index.json validates against schema/index.schema.json', JSON.stringify(validate.errors))
+check(
+  validate(JSON.parse(catalogText)),
+  `${CATALOG_PATH.join('/')} validates against schema/marketplace.schema.json`,
+  JSON.stringify(validate.errors),
+)
 console.log('')
+
+for (const dir of scratch) rmSync(dir, { recursive: true, force: true })
 
 console.log(`validate-catalog: ${String(failures.length)} failure(s), ${String(notes.length)} note(s)`)
 for (const line of failures) console.log(`  FAIL  ${line}`)

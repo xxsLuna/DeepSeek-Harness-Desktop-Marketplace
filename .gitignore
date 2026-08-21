@@ -1,7 +1,4 @@
 node_modules/
-# npm pack output. Never committed: the tarball lives on a GitHub Release, and a
-# copy in the tree would be a second set of bytes with no digest covering it.
-dist/
 # The desktop checkout the CI gate makes, so a local `npm run validate` can use
 # the same path without dirtying the tree.
 .desktop/
