@@ -1,0 +1,80 @@
+# The catalog gate: every pull request, and every push to the branch Pages
+# serves. It is the only thing standing between a submitted row and code the
+# desktop app will download and run, so it is deliberately not a linter.
+#
+# It checks out TWO repositories and drives the desktop app's own
+# `packages/market/lib/fetch.js` — `parseCatalog`, `parseIntegrity`,
+# `verifyIntegrity`, `isAllowedSource`, `fetchTarball` — rather than
+# re-implementing any of them here.
+#
+# That choice is the whole design, and the reason is specific: a gate holding a
+# second copy of the catalog rules can only ever drift toward passing. It would
+# accept a row the installer refuses (a wasted release, discovered by users) or,
+# far worse, accept a digest form the installer treats differently. There is no
+# version of "keep the two in sync by hand" that survives a year. So the app is
+# the single authority on catalog shape and byte integrity, this repo owns only
+# what fetch.js cannot see — what is INSIDE the tarball — and a change to the
+# app's rules shows up here as a red check on the next pull request instead of
+# as a silent divergence.
+#
+# The desktop checkout is NOT built and NOT `npm ci`-ed. fetch.js imports
+# nothing but `node:crypto`, so importing it by path costs one checkout and no
+# install; an `npm ci` there would pull an Electron download to run four pure
+# functions.
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the catalog
+        uses: actions/checkout@v4
+
+      # Pinned to a ref, not to a SHA, on purpose: the point of driving the
+      # app's module is to notice when the app's rules move. `main` is what
+      # installed clients run.
+      - name: Check out the desktop app (for its market module)
+        uses: actions/checkout@v4
+        with:
+          repository: xxsLuna/deepseek-harness-desktop
+          ref: main
+          path: .desktop
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # The two devDependencies are the gate's own: js-yaml to read a patch
+      # layer with the same parser the harness uses for it, and ajv to check the
+      # editor-time schema still describes the file it advertises. No plugin may
+      # have dependencies; this repo is not a plugin.
+      - name: Install the gate's tools
+        run: npm ci || npm install
+
+      # Runs with the network, because verifying a release asset means
+      # downloading it. fetchTarball follows redirects by hand and re-checks the
+      # scheme on every hop, so the github.com -> objects.githubusercontent.com
+      # redirect is exercised here exactly as it is on a user's machine.
+      - name: Validate the catalog
+        run: node scripts/validate-catalog.mjs --desktop .desktop
+
+  # The one required status check. Named so it never changes: a required check
+  # that stops existing blocks every pull request forever.
+  catalog-valid:
+    if: always()
+    needs: [catalog]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify the gate passed
+        run: |
+          echo "catalog job result: ${{ needs.catalog.result }}"
+          test "${{ needs.catalog.result }}" = "success"

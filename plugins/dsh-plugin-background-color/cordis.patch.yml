@@ -1,0 +1,24 @@
+# The one row this plugin composes. Applied as a profile-bundle patch layer:
+# the installer adds the package to `dsh.profile.bundles` in the profile's
+# package.json, and `loadProfile` reads `dsh.bundle.patch` from this package's
+# manifest to find this file.
+#
+# The layer is appended AFTER the app's own rows, so a plugin can only add to
+# what the app composed — it cannot re-enable a row the desktop surface is
+# built on having off, because the launcher's hard overlays come last.
+
+- insert:
+    # `id` and `name` are both the package name, and both on purpose.
+    #
+    # `name` MUST be the package name because the Loader resolves a row by
+    # `import(options.name)`, and the client-module scan matches a package's
+    # `dsh.client` declaration against that same `options.name`. A short name
+    # there means the browser half is silently never loaded — the scan caches
+    # the unresolvable name as "not a client package" and logs nothing.
+    #
+    # `id` could be a short slug, but a duplicate id anywhere in the composed
+    # tree throws `duplicate loader entry id` and the app does not start. The
+    # package name is the only string a third-party plugin can be sure nobody
+    # else has taken, so it is the id too.
+    - id: dsh-plugin-background-color
+      name: dsh-plugin-background-color
