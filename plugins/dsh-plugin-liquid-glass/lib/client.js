@@ -242,10 +242,100 @@ function sheetFor(s) {
     // correct on all of them. The band's own clearance moves from the column's
     // padding to this margin — left as padding it would stack with the inset
     // and push the content down twice.
+    // OUTER spacing only. An earlier version also zeroed the column's own
+    // `padding-top` and moved the title-band clearance into this margin, so
+    // that the panel would begin below the band. It looked defensible and it
+    // was wrong: that padding is the app's internal spacing, every child is
+    // positioned against it, and taking it away rearranged the sidebar's
+    // contents. A third-party stylesheet gets to say where a panel sits; it
+    // does not get to redistribute the space inside it.
+    //
+    // So the margin is uniform and the padding is left alone. The panel's top
+    // edge tucks under the title band, which is where a floating sidebar sits
+    // on the platform this imitates anyway, and the band's own clearance keeps
+    // doing the one job it was already doing.
     'body ' + ANCHORS[2].selector + ' {',
-    '  margin: calc(var(--dsh-title-band, 0px) + var(--lg-inset)) var(--lg-inset) var(--lg-inset) !important;',
-    '  padding-top: 0 !important;',
+    // The same gap on all four sides. A floating pane with a different margin
+    // at the top than the bottom does not read as floating, it reads as
+    // misaligned — and the eye catches that immediately even when it cannot say
+    // why. An earlier version sat flush at the top to keep clear of the title
+    // bar; the gap that fixed was 46px, not 8, and 8 is small enough that the
+    // panel still belongs to the top of the window.
+    '  margin: var(--lg-inset) !important;',
+    // No hairline and no specular along the TOP of this one. That edge runs
+    // through the title-bar strip, where a bright 1px line spanning the column
+    // reads as a grey bar someone added rather than as the lit edge of a pane.
+    // The other three sides keep theirs, and the dialog and composer keep all
+    // four — neither of them runs through the title bar.
+    '  border-top-color: transparent !important;',
+    '  box-shadow: var(--lg-shadow) !important;',
+    // Pull the contents back up by exactly the inset, and no further. The
+    // column's padding exists to clear the title band; the inset then pushed
+    // everything down a second time, which is why the sidebar's contents sat
+    // lower with this plugin on than without it. Subtracting the inset from the
+    // padding puts the first row back on the band's bottom edge.
+    //
+    // It stops there for a hard reason, not a cautious one. `#dsh-drag-strip`
+    // covers the top `--dsh-title-band` pixels with `pointer-events: auto` and
+    // `-webkit-app-region: drag`, so anything drawn under it is unclickable —
+    // measured: at y=20 the strip is the topmost element, at y=44 the sidebar
+    // is. Content raised past that line would look right and stop responding.
+    //
+    // `max()` because a platform that kept its native title bar has no band at
+    // all, and a negative padding is not a smaller one, it is an ignored
+    // declaration.
+    '  padding-top: max(0px, calc(var(--dsh-title-band, 0px) - var(--lg-inset))) !important;',
     '}',
+    // The launcher's hamburger, which opens the same menu the app already
+    // offers from inside the sidebar. Flush against a floating panel it is the
+    // one piece of chrome left sitting on the window rather than on a pane, and
+    // hiding it is why the top-left reads as one surface. Hidden only while
+    // this plugin is on; removing the plugin brings it straight back.
+    'body #dsh-menu-button {',
+    '  display: none !important;',
+    '}',
+    // Collapsed, the column is only as wide as its icons, and taking 2 x inset
+    // out of that clips them. The state lives in an inline
+    // `grid-template-columns` on the frame, which no selector can see, so the
+    // browser half watches the column and marks the body — see `watchWidth`.
+    // Below the threshold the panel goes back to filling its track exactly.
+    'body[data-lg-narrow] ' + ANCHORS[2].selector + ' {',
+    '  margin: 0 !important;',
+    '  border-radius: 0 !important;',
+    '  border-left-color: transparent !important;',
+    // No inset here, so nothing was pushed down and there is nothing to pull
+    // back up: the band's full clearance is correct again.
+    '  padding-top: var(--dsh-title-band, 0px) !important;',
+    '}',
+    // The app writes an explicit pixel width inline on the sidebar's inner root
+    // — it is a resizable column, so JS owns that number — and that width is
+    // the column's ORIGINAL width. Once the panel is inset it is narrower than
+    // its own contents, `overflow: hidden` takes the difference, and the right
+    // edge of everything inside is quietly cut off.
+    //
+    // `max-width` rather than `width`, and this is the whole reason it is safe:
+    // it does not impose a size, it only stops one from exceeding the panel. A
+    // sidebar the user has dragged narrower keeps exactly the width they chose.
+    // An author `!important` outranks an inline declaration that has none, which
+    // is what lets a stylesheet correct a number JS wrote.
+    'body ' + ANCHORS[2].selector + ' [style*="width"] {',
+    '  max-width: 100% !important;',
+    '}',
+    // NOT here: rounding the window itself.
+    //
+    // It is the obvious next thing to want, and from inside the page it does
+    // nothing. The frame is the outermost element the page paints, so rounding
+    // it exposes whatever is behind — `body`, and behind that the BrowserWindow
+    // — and both are the same colour the frame was. Tried with the page
+    // backgrounds cleared to transparent as well: the corners came out
+    // pixel-identical, because a window that is not `transparent: true` still
+    // composites its own opaque background underneath.
+    //
+    // Making a window genuinely round is a BrowserWindow option, which belongs
+    // to the launcher; a plugin runs in the harness process and cannot reach
+    // it. Shipping the rule anyway would add an `overflow: hidden` on the app's
+    // outermost container — a real way to clip a popover — in exchange for
+    // nothing visible, so it is left out and written down instead.
     // Motion is part of the look, but only for people who have not asked for
     // less of it.
     '@media (prefers-reduced-motion: no-preference) {',
@@ -274,6 +364,109 @@ function installSheet(css) {
     // thing the next reader has to rule out, and uninstall should leave no
     // trace of a plugin that is gone.
     if (installed.parentNode !== null) installed.parentNode.removeChild(installed)
+  }
+}
+
+/**
+ * Below this, the sidebar is showing icons only and has no room to give away.
+ *
+ * Chosen so the decision cannot oscillate. Expanded, the column is ~280 and the
+ * panel ~264 once the inset is taken; collapsed it is a few dozen pixels either
+ * way. Both readings of each state land on the same side of this number, so
+ * removing the inset can never widen the panel back over the line and put it
+ * straight back.
+ */
+var NARROW_PX = 140
+
+/**
+ * How long after a layout change to look again.
+ *
+ * Comfortably past the collapse animation, and short enough that a wrong
+ * reading taken mid-transition is never on screen long enough to notice.
+ */
+var SETTLE_MS = 400
+
+/**
+ * Mark the body while the sidebar is collapsed.
+ *
+ * The collapsed state is an inline `grid-template-columns` on the frame — no
+ * class, no attribute, nothing a selector can reach — so a stylesheet can only
+ * respond to it if something watches and writes a hook. The attribute this sets
+ * is the plugin's own and lives on `body`, where it cannot collide with
+ * anything upstream owns.
+ *
+ * Two things here were arrived at the hard way.
+ *
+ * **The frame is watched, not the sidebar.** A `ResizeObserver` on the column
+ * fires once and then never again: collapsing re-mounts that element, the
+ * observed node is detached, and observation goes with it. Measured — the
+ * observer reported 262px and stayed silent through a 264 → 40 collapse. The
+ * frame is not re-mounted, and it is the node the state actually lives on.
+ *
+ * **The track is read, not the panel.** The first grid track is the width the
+ * app decided; the panel is that minus this plugin's own inset. Keying off the
+ * panel would mean this rule's input depends on the rule's output, and the
+ * threshold could then chase itself. The track is independent of anything here.
+ * @param {Element} frame - the layout frame, whose inline style carries the state.
+ * @returns {() => void} a disposer that stops watching and clears the mark.
+ */
+function watchLayout(frame) {
+  /** Pending re-read once the collapse animation has settled. */
+  var settle = 0
+
+  var mark = function () {
+    var first = getComputedStyle(frame).gridTemplateColumns.split(' ')[0]
+    var width = parseFloat(first)
+    // A track that is not a plain px value means the layout is doing something
+    // this does not understand, and quietly guessing "collapsed" would strip
+    // the inset off a perfectly normal sidebar. Leave it alone instead.
+    if (isFinite(width) && width > 0 && width < NARROW_PX) {
+      document.body.setAttribute('data-lg-narrow', '')
+    } else {
+      document.body.removeAttribute('data-lg-narrow')
+    }
+  }
+  /**
+   * Read now, and read again once the column has stopped moving.
+   *
+   * The collapse is animated, so `getComputedStyle` during it returns an
+   * interpolated track width — and an interpolated width is a real number that
+   * happens to be wrong. Measured: a startup pass latched 56px mid-transition
+   * and the sidebar stayed marked collapsed at its full 280px, because the
+   * animation finishing writes no attribute and fires no mutation, so nothing
+   * ever asked again.
+   *
+   * `transitionend` is the precise signal and does not fire when the change was
+   * not animated; the timeout is the one that always arrives. Running both,
+   * with the immediate read as well, means the mark is right within a frame in
+   * the common case and right within `SETTLE_MS` in every case.
+   */
+  var schedule = function () {
+    mark()
+    if (settle !== 0) clearTimeout(settle)
+    settle = setTimeout(function () {
+      settle = 0
+      mark()
+    }, SETTLE_MS)
+  }
+
+  mark()
+  // The inline `style` is where the collapse is written, so that attribute is
+  // the signal. `ResizeObserver` covers the other way the tracks change — the
+  // window being resized. Both nodes survive a collapse (checked: the frame and
+  // the column keep their identity across a toggle), so observing them directly
+  // is enough and no subtree watch is needed.
+  var mutations = new MutationObserver(schedule)
+  mutations.observe(frame, { attributes: true, attributeFilter: ['style'] })
+  var resizes = new ResizeObserver(schedule)
+  resizes.observe(frame)
+  frame.addEventListener('transitionend', schedule)
+  return function () {
+    if (settle !== 0) clearTimeout(settle)
+    frame.removeEventListener('transitionend', schedule)
+    mutations.disconnect()
+    resizes.disconnect()
+    document.body.removeAttribute('data-lg-narrow')
   }
 }
 
@@ -495,6 +688,34 @@ function apply(ctx) {
       if (remove !== undefined) remove()
     }
   }, 'liquid-glass: stylesheet')
+
+  ctx.effect(function () {
+    /** @type {(() => void) | undefined} */
+    var stop
+    /** @type {number | undefined} */
+    var frame
+
+    // Retried rather than looked for once. This row activates before React has
+    // painted the shell, so a single deferred query finds nothing and the
+    // collapsed sidebar then clips its icons with no sign of why — measured,
+    // after shipping exactly that. Retrying costs one query per frame for as
+    // long as the column is missing, and stops the moment it is found.
+    var look = function () {
+      var layout = document.querySelector('[class*="_frame"]')
+      if (layout !== null) {
+        stop = watchLayout(layout)
+        frame = undefined
+        return
+      }
+      frame = requestAnimationFrame(look)
+    }
+    look()
+
+    return function () {
+      if (frame !== undefined) cancelAnimationFrame(frame)
+      if (stop !== undefined) stop()
+    }
+  }, 'liquid-glass: collapsed-sidebar watch')
 
   // `slots.inject` rather than a bare register: the cell is declared by the
   // Plugin configuration tab and only exists while that tab is mounted, so

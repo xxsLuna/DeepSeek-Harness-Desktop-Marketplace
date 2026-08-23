@@ -87,12 +87,58 @@ and it is how the platform this imitates has drawn a sidebar since the look was
 introduced. `inset` is the gap, and it is most of why the main window reads as
 glass at all.
 
-The top inset clears the title band rather than guessing at it —
-`--dsh-title-band` is published by `@dsh-desktop/chrome` and is 0 on a platform
-that kept its native title bar, so one expression is right everywhere. The
-band's own clearance moves out of the column's padding and into that margin;
-left where it was, it would stack with the inset and push the content down
-twice.
+The gap is the same on all four sides. A floating pane with a different margin
+at the top than the bottom does not read as floating, it reads as misaligned,
+and the eye catches that before it can say why.
+
+The contents come back up by exactly the inset — the column's padding is there
+to clear the title band, and the inset was pushing everything down a second
+time, so the sidebar sat lower with this plugin on than without it. It stops
+precisely at the band's lower edge, and that limit is not caution:
+`#dsh-drag-strip` covers the top `--dsh-title-band` pixels with
+`pointer-events: auto` and `-webkit-app-region: drag`, so anything drawn under
+it is unclickable. Measured — at y=20 the strip is the topmost element, at y=44
+the sidebar is. Content raised past that line would look right and stop
+responding.
+
+The launcher's hamburger is hidden while this is on. It is the one piece of
+chrome left sitting on the window rather than on a pane, and against a floating
+sidebar it reads as left over. Removing the plugin brings it straight back.
+
+An earlier version went further and zeroed the column's `padding-top` outright,
+moving the band's clearance into the margin. That looked defensible and it was
+wrong: the padding is the app's internal spacing, every child is positioned
+against it, and taking it away rearranged the sidebar's contents. Adjusting it
+by the amount this plugin itself added is a different thing from redistributing
+it.
+
+**The inset costs sidebar width, and more than you would guess.** The app writes
+an explicit pixel width inline on the sidebar's inner root — it is a resizable
+column, so JS owns that number — and that number is the column's original width.
+Narrow the panel and its own contents no longer fit, `overflow: hidden` takes
+the difference, and the right edge of everything inside is quietly cut off. The
+fix is one rule, `max-width: 100%`, which imposes no size and only stops one
+exceeding the panel, so a column the user dragged narrower keeps the width they
+chose. (An author `!important` outranks an inline declaration carrying none,
+which is what lets a stylesheet correct a number JS wrote.) The app then
+re-measures once per session and settles about `2 × inset` narrower than before.
+It does not accumulate across restarts — each boot starts from the app's own
+width — but `inset: 0` is there for anyone who wants every pixel back.
+
+**Collapsed, the inset is dropped entirely.** The collapsed column is only as
+wide as its icons and has nothing to give away; taking `2 × inset` out of it
+clipped six of them by 7px. The state lives in an inline
+`grid-template-columns` on the frame — no class, no attribute, nothing a
+selector can see — so the browser half watches for it and marks `body`, and the
+stylesheet keys off that mark.
+
+Two things about that watch were arrived at the hard way, and both produced a
+sidebar that stayed marked wrong with nothing in the log. A `ResizeObserver` on
+the *column* fires once and then goes silent, so the frame is watched instead.
+And the collapse is **animated**, so a reading taken while it runs returns an
+interpolated track width — a real number that happens to be wrong, latched with
+no further mutation to correct it. Every trigger therefore reads now and again
+once the transition has settled.
 
 Which is where the second surprise was. `@dsh-desktop/chrome` sets that padding
 with `!important`, at exactly the same specificity as a bare
@@ -159,6 +205,19 @@ third-party plugin can do about a seam it does not own.
 
 ## What it does not do
 
-The window itself is opaque, so this is glass over the app's *own* background,
-not over your desktop. Real window vibrancy is the launcher's to give — a
-plugin runs inside the harness process and cannot reach the `BrowserWindow`.
+**It does not round the window.** That is the obvious next thing to want, and
+from inside the page it does nothing at all. The frame is the outermost element
+the page paints, so rounding it exposes what is behind — `body`, and behind that
+the window — and both are the colour the frame just was. Tried with the page
+backgrounds cleared to transparent as well: the corners came out
+pixel-identical, because a window that is not `transparent: true` still
+composites its own opaque background underneath. Shipping the rule anyway would
+put an `overflow: hidden` on the app's outermost container, which is a real way
+to clip a popover, in exchange for nothing visible.
+
+**It does not give you real vibrancy.** The window is opaque, so this is glass
+over the app's *own* background, not over your desktop.
+
+Both are `BrowserWindow` properties, and a plugin runs inside the harness
+process where there is no `BrowserWindow` to reach. They are the launcher's to
+give, which is exactly the boundary this app draws everywhere else.
