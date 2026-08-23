@@ -321,6 +321,26 @@ function sheetFor(s) {
     'body ' + ANCHORS[2].selector + ' [style*="width"] {',
     '  max-width: 100% !important;',
     '}',
+    // The sidebar's rendered root must not paint over the glass.
+    //
+    // It carries the opaque sidebar fill and covers the column from just below
+    // the title band all the way down, so the only place the frosting was ever
+    // visible was the strip of padding above it — which is exactly why that
+    // strip read as a grey bar someone had added. The panel was never glass. It
+    // was an opaque column with a lit edge on top of it.
+    //
+    // Reached structurally rather than through the inline width, because the
+    // app only writes that width while the sidebar is expanded: keying off it
+    // left the collapsed rail painting its own fill and the grey bar came
+    // straight back. The wrapper in between is `display: contents`, so this is
+    // one element in both states — checked in both.
+    //
+    // Cleared rather than re-tinted: the column underneath already carries the
+    // colour, the translucency and the sheen, and painting the same thing twice
+    // would double the tint.
+    'body ' + ANCHORS[2].selector + ' > * > * {',
+    '  background-color: transparent !important;',
+    '}',
     // NOT here: rounding the window itself.
     //
     // It is the obvious next thing to want, and from inside the page it does

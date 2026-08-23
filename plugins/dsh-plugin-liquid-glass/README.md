@@ -105,6 +105,19 @@ The launcher's hamburger is hidden while this is on. It is the one piece of
 chrome left sitting on the window rather than on a pane, and against a floating
 sidebar it reads as left over. Removing the plugin brings it straight back.
 
+**The sidebar was never actually glass**, and that took three attempts to see.
+Its rendered root carries the opaque sidebar fill and covers the column from
+just below the title band all the way down, so the frosting only ever showed in
+the strip of padding above it — a lighter block ending in a hard edge, which is
+precisely what "there is a grey bar at the top" was describing. It was not a
+stray highlight; it was the only part of the panel that was not being painted
+over. Clearing that fill is what turns the column into one continuous surface.
+
+It has to be reached structurally (`> * > *`, through a `display: contents`
+wrapper) rather than through the inline width the app writes, because that width
+only exists while the sidebar is expanded — keying off it left the collapsed
+rail painting its own fill and the grey bar came straight back.
+
 An earlier version went further and zeroed the column's `padding-top` outright,
 moving the band's clearance into the margin. That looked defensible and it was
 wrong: the padding is the app's internal spacing, every child is positioned
