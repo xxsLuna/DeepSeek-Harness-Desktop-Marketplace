@@ -44,6 +44,10 @@ export const NAMESPACE = settingsNamespace('ui-liquid-glass')
  *   higher number reads as a solid chip, which is what the first release
  *   shipped and what made the glass look switched off.
  * - `radius` is clamped where the composer's own 22px sits comfortably.
+ * - `inset` is the gap that makes the sidebar a floating pane rather than a
+ *   wall, and is most of why the main window reads as glass at all. 0 puts it
+ *   back flush against the frame; past ~24 the column starts losing usable
+ *   width to decoration.
  *
  * The schema clamps because these reach CSS as numbers this plugin composes
  * into a value; a negative blur or a 900% opacity is not a taste to respect,
@@ -54,6 +58,7 @@ export const GlassSettings = z.object({
   saturation: z.number().min(100).max(300).default(180).description('Backdrop saturation, as a percentage.'),
   opacity: z.number().min(25).max(100).default(45).description('Panel opacity, as a percentage.'),
   radius: z.number().min(0).max(40).default(20).description('Panel corner radius, in pixels.'),
+  inset: z.number().min(0).max(24).default(8).description('Gap between the sidebar and the window edge, in pixels.'),
 })
 
 /**

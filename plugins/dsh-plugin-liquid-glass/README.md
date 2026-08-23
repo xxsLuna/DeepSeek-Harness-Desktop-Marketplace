@@ -5,11 +5,13 @@ language introduced across Apple's platforms in the OS 26 generation. Backdrop
 blur, a saturation lift so colour behind a panel blooms through it, a specular
 hairline along the top edge, and generous corners.
 
-Three surfaces are frosted: **dialogs**, the **composer**, and the **sidebar**.
+Three surfaces are frosted: **dialogs**, the **composer**, and the **sidebar** —
+and the sidebar is inset from the window on every side, with all four corners
+rounded, so it floats rather than lining the edge.
 
 ## Tuning it
 
-**Settings ▸ Plugins ▸ Plugin configuration ▸ Liquid Glass** — four sliders,
+**Settings ▸ Plugins ▸ Plugin configuration ▸ Liquid Glass** — five sliders,
 applied when you release each one. The values also live in
 `$DSH_HOME/settings.yaml` and apply without a reload:
 
@@ -19,6 +21,7 @@ ui-liquid-glass:
   saturation: 180 # %,   100–300
   opacity: 45     # %,   25–100
   radius: 20      # px,  0–40
+  inset: 8        # px,  0–24
 ```
 
 Each bound has a reason a user would notice rather than a stylistic one. Blur
@@ -32,7 +35,7 @@ blur is a typo, not a taste.
 Set `opacity: 100` for the panels without the translucency, or `blur: 0` for
 translucency without the blur.
 
-**Reset to defaults** clears all four with `unset` rather than writing the
+**Reset to defaults** clears all five with `unset` rather than writing the
 current defaults back in. Writing them would pin today's numbers into your
 document, and a later change to a default would then never reach you — the
 button would quietly mean "freeze these forever". It greys out when nothing is
@@ -70,6 +73,35 @@ solid chip — the glass looked switched off. The default is 45, where it lands 
 almost exactly that token, so a panel looks native and is still visibly
 see-through.
 
+## Why the main window needed more than a blur
+
+The dialog looked right long before the main window did, and the reason is that
+a dialog was the only panel doing anything a blur can show. The fix for the rest
+was not more blur, it was geometry.
+
+Flush to the window, the sidebar is a full-bleed column. Three of its four
+corners have nothing to be round against, so rounding only the inner edge reads
+as a mistake rather than a shape; and because no window shows around it, there
+is no sense of a pane sitting *on* anything. Insetting it supplies exactly that,
+and it is how the platform this imitates has drawn a sidebar since the look was
+introduced. `inset` is the gap, and it is most of why the main window reads as
+glass at all.
+
+The top inset clears the title band rather than guessing at it —
+`--dsh-title-band` is published by `@dsh-desktop/chrome` and is 0 on a platform
+that kept its native title bar, so one expression is right everywhere. The
+band's own clearance moves out of the column's padding and into that margin;
+left where it was, it would stack with the inset and push the content down
+twice.
+
+Which is where the second surprise was. `@dsh-desktop/chrome` sets that padding
+with `!important`, at exactly the same specificity as a bare
+`[class*="sidebarCol"]` — and `!important` does not settle a fight between two
+author rules that both carry it. Specificity does, and document order only after
+that, so which sheet happened to be appended last was silently deciding the
+layout. Every selector here is scoped under `body` for that reason: (0,1,1)
+against (0,1,0) is an answer that does not depend on load order.
+
 ## Why a stylesheet, when the sibling plugin argues against one
 
 `dsh-plugin-background-color` makes the case that `overrideTokens` beats CSS
@@ -84,9 +116,16 @@ carries any of them. So this plugin injects a `<style>` tag — tagged
 is findable in the inspector.
 
 The cost is real: the sheet has to out-specify CSS-module rules on the elements
-it restyles, so the declarations carry `!important`. It is confined to the four
-properties that make the effect and never touches layout, so a rule that loses
-leaves a panel looking ordinary rather than a window that breaks.
+it restyles, so the declarations carry `!important`.
+
+For the dialog and the composer that stays confined to colour, blur, border and
+shadow — a rule that loses there leaves a panel looking ordinary rather than a
+window that breaks. **The sidebar's inset does not have that property.** It is
+`margin` and `padding-top`, which is layout, and getting it wrong moves things
+rather than merely under-decorating them. That is the one place this plugin
+takes a real risk, it is why the rule is scoped to raise its specificity rather
+than trusting `!important` alone, and it is why `inset: 0` exists — it puts the
+column back exactly where the app had it.
 
 The panel colour itself is **not** imposed — it is
 `color-mix(… var(--dsw-alias-bg-layer-1) …)`, so it follows the palette and

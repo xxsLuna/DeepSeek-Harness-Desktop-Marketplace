@@ -63,7 +63,7 @@ var TAG_ID = 'dsh-plugin-liquid-glass'
 var inject = ['settingsScope', 'connection', 'slots']
 
 /** Falls back to the schema's own defaults until the host registration lands. */
-var FALLBACK = { blur: 20, saturation: 180, opacity: 45, radius: 20 }
+var FALLBACK = { blur: 20, saturation: 180, opacity: 45, radius: 20, inset: 8 }
 
 /**
  * What gets frosted, in the order the card lists them.
@@ -104,9 +104,9 @@ var ANCHORS = [
     // Settings dialog collapses into the sidebar's width. Measured, not feared.
     //
     // Nothing is lost by leaving it off: the sidebar sits on the flat window
-    // frame, so there is no content behind it for a blur to reveal. It keeps
-    // the translucency, the specular edge and the rounded inner corner, which
-    // is the entire visible effect here.
+    // frame, so there is no content behind it for a blur to reveal. What makes
+    // it read as glass is the inset, the four rounded corners, the specular
+    // edge and the translucency — none of which need a backdrop-filter.
     blur: false,
     note: 'Matches a hashed CSS-module local name; an upstream rename silently unfrosts it.',
   },
@@ -115,7 +115,7 @@ var ANCHORS = [
 /**
  * Read the four numbers out of a settings-scope snapshot.
  * @param {any} snapshot - the scope snapshot from `getSnapshot()`.
- * @returns {{blur: number, saturation: number, opacity: number, radius: number}} the values to render.
+ * @returns {{blur: number, saturation: number, opacity: number, radius: number, inset: number}} the values to render.
  */
 function readSettings(snapshot) {
   var value = snapshot && snapshot.status === 'ready' ? snapshot.value : undefined
@@ -130,21 +130,33 @@ function readSettings(snapshot) {
 /**
  * Compose the stylesheet.
  *
- * Everything variable is a custom property on `:root`, so the rules below are
- * constant text and only the four numbers change — which also means the
- * effect can be inspected and poked at in devtools without going through this
- * plugin at all.
+ * Everything variable is a custom property on `body`, so the rules below are
+ * constant text and only the numbers change — which also means the effect can
+ * be inspected and poked at in devtools without going through this plugin at
+ * all.
  *
  * The scheme split is `body[data-ds-dark-theme]`, the same selector the shipped
  * palette uses for its own dark declarations. A specular highlight that reads
  * as glass on a dark panel is a white haze on a light one, so the two schemes
  * get different highlight strengths rather than one compromise.
- * @param {{blur: number, saturation: number, opacity: number, radius: number}} s - the current settings.
+ * @param {{blur: number, saturation: number, opacity: number, radius: number, inset: number}} s - the current settings.
  * @returns {string} the sheet.
  */
 function sheetFor(s) {
-  var selectors = ANCHORS.map(function (a) { return a.selector }).join(',\n')
-  var blurred = ANCHORS.filter(function (a) { return a.blur }).map(function (a) { return a.selector }).join(',\n')
+  // Every selector is scoped under `body`, and that is a specificity move
+  // rather than a tidiness one. `!important` does not settle a fight between
+  // two author rules that both carry it — specificity decides, and document
+  // order only after that. @dsh-desktop/chrome declares
+  // `[class*="_sidebarCol"] { padding-top: var(--dsh-title-band) !important }`
+  // at exactly the same specificity as a bare `[class*="sidebarCol"]`, so which
+  // sheet happened to be appended last silently decided the layout — and it was
+  // not this one. One element to the left makes it (0,1,1) against (0,1,0) and
+  // the answer stops depending on load order.
+  var scope = function (list) {
+    return list.map(function (one) { return 'body ' + one }).join(',\n')
+  }
+  var selectors = scope(ANCHORS.map(function (a) { return a.selector }))
+  var blurred = scope(ANCHORS.filter(function (a) { return a.blur }).map(function (a) { return a.selector }))
   return [
     // Declared on `body`, NOT `:root`, and that is load-bearing rather than
     // stylistic: `--dsw-alias-bg-layer-1` is declared by the palette on `body`,
@@ -158,6 +170,7 @@ function sheetFor(s) {
     '  --lg-saturate: ' + s.saturation + '%;',
     '  --lg-opacity: ' + s.opacity + '%;',
     '  --lg-radius: ' + s.radius + 'px;',
+    '  --lg-inset: ' + s.inset + 'px;',
     // Light scheme: the panel sits on pale surfaces, so the edge is a thin grey
     // rather than white, which would be invisible.
     '  --lg-edge: color-mix(in srgb, #000 12%, transparent);',
@@ -212,11 +225,26 @@ function sheetFor(s) {
     '  backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) !important;',
     '  -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) !important;',
     '}',
-    // The sidebar is a full-height column, so rounding all four corners would
-    // leave gaps against the window edge. Only the inner edge is rounded.
-    ANCHORS[2].selector + ' {',
-    '  border-radius: 0 var(--lg-radius) var(--lg-radius) 0 !important;',
-    '  border-left: none !important;',
+    // The sidebar floats, and that is the whole difference between this reading
+    // as glass and reading as a wall.
+    //
+    // Left flush to the window it is a full-bleed column: three of its four
+    // corners have nothing to be round against, so rounding only the inner edge
+    // looks like a mistake rather than a shape, and — more to the point —
+    // nothing of the window shows around it, so there is no sense of a pane
+    // sitting ON something. Insetting it is what creates that, and it is how
+    // the platform this imitates has drawn a sidebar since the look was
+    // introduced.
+    //
+    // The top inset clears the title band rather than guessing at it:
+    // `--dsh-title-band` is published by @dsh-desktop/chrome, and is 0 on a
+    // platform that kept its native title bar, so the same expression is
+    // correct on all of them. The band's own clearance moves from the column's
+    // padding to this margin — left as padding it would stack with the inset
+    // and push the content down twice.
+    'body ' + ANCHORS[2].selector + ' {',
+    '  margin: calc(var(--dsh-title-band, 0px) + var(--lg-inset)) var(--lg-inset) var(--lg-inset) !important;',
+    '  padding-top: 0 !important;',
     '}',
     // Motion is part of the look, but only for people who have not asked for
     // less of it.
@@ -263,6 +291,7 @@ function makeCard(React, scope) {
     { field: 'saturation', label: 'Saturation', min: 100, max: 300, suffix: '%' },
     { field: 'opacity', label: 'Opacity', min: 25, max: 100, suffix: '%' },
     { field: 'radius', label: 'Corner', min: 0, max: 40, suffix: 'px' },
+    { field: 'inset', label: 'Inset', min: 0, max: 24, suffix: 'px' },
   ]
 
   /**
