@@ -73,7 +73,21 @@ var FALLBACK = { light: '#ffffff', dark: '#151517' }
  * `@dsh-desktop/connection` instead, so the service name is portable and the
  * package name is not.
  */
-var inject = ['theme', 'settingsScope', 'connection']
+var inject = ['theme', 'settingsScope', 'connection', 'slots']
+
+/**
+ * A CSS hex colour, in the three lengths a browser accepts.
+ *
+ * Only the card uses this, and the stored value stays unvalidated on purpose:
+ * the presenter writes it straight into `body.style.setProperty`, where a value
+ * the browser cannot parse is dropped and the palette declaration underneath
+ * still applies, so a regex in the STORE would reject `oklch()` and every
+ * colour function added after it was written. A text box is a different
+ * situation — someone typing gets no feedback at all from a value that is
+ * silently discarded, so the box refuses to save what it cannot show a swatch
+ * of. Editing the YAML by hand still accepts anything.
+ */
+var HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
 
 /**
  * Read one `{light, dark}` pair out of a settings-scope snapshot.
@@ -101,6 +115,151 @@ function layerFor(pair) {
     tokens[TOKENS[i]] = { light: pair.light, dark: pair.dark }
   }
   return tokens
+}
+
+/**
+ * The settings card: two hex boxes, one per scheme.
+ *
+ * Built with `React.createElement` and no JSX, because this bundle is still
+ * hand-written and a build step is the one thing this plugin is demonstrating
+ * you can do without. React itself is NOT a dependency — the client module
+ * system hands it to the factory through `require`, the same way the desktop
+ * app's own bundles take it as an external. So a card costs a function, not a
+ * toolchain.
+ *
+ * The Plugins tab enumerates registered settings namespaces and dispatches
+ * `settings.plugin.item` once per namespace, keyed by the namespace name; it
+ * never interprets one. So the cell for `ui-background` is already being
+ * dispatched — before this existed it simply rendered empty. Claiming the key
+ * is the whole of "having a settings UI".
+ *
+ * @param {any} React - the React namespace, from the factory's `require`.
+ * @param {any} scope - the bound settings scope for this namespace.
+ * @returns {() => any} the card component.
+ */
+function makeCard(React, scope) {
+  var h = React.createElement
+
+  /**
+   * One labelled hex field.
+   * @param {{ field: 'light'|'dark', label: string, snapshot: any }} props - which field, and the current snapshot.
+   * @returns the row.
+   */
+  function Field(props) {
+    var stored = readPair(props.snapshot)[props.field]
+    // The box holds a DRAFT while it is focused, so a half-typed `#ee` is not
+    // written and then read back over the cursor. `undefined` means "showing
+    // what is stored", which is what makes an edit from the YAML file appear
+    // here without the box fighting it.
+    var draftState = React.useState(undefined)
+    var draft = draftState[0]
+    var setDraft = draftState[1]
+    var text = draft === undefined ? stored : draft
+    var valid = HEX.test(text)
+    var writable = props.snapshot && props.snapshot.writable === true
+
+    var commit = function () {
+      setDraft(undefined)
+      if (!valid || text === stored) return
+      // Fire and forget: `set` resolves after the host has written and the
+      // mirror has folded the answer back in, and the subscription below is
+      // what re-renders. Awaiting here would only delay the same result.
+      scope.set(props.field, text)
+    }
+
+    return h('label', {
+      style: { display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 0', fontSize: '13px' },
+    }, [
+      h('span', { key: 'l', style: { width: '48px', opacity: 0.7 } }, props.label),
+      // A live preview of what the text currently means. This is why the field
+      // validates at all: without it an unparseable value is indistinguishable
+      // from a colour that happens to look like the old one.
+      h('span', {
+        key: 's',
+        style: {
+          width: '20px',
+          height: '20px',
+          borderRadius: '5px',
+          border: '1px solid color-mix(in srgb, currentColor 25%, transparent)',
+          background: valid ? text : 'transparent',
+        },
+      }),
+      h('input', {
+        key: 'i',
+        value: text,
+        disabled: !writable,
+        spellCheck: false,
+        placeholder: FALLBACK[props.field],
+        onChange: function (event) { setDraft(event.target.value) },
+        onBlur: commit,
+        onKeyDown: function (event) {
+          if (event.key === 'Enter') commit()
+          // Escape abandons the draft rather than committing it, which is the
+          // only way back to the stored value once you have typed over it.
+          if (event.key === 'Escape') setDraft(undefined)
+        },
+        style: {
+          font: 'inherit',
+          fontSize: '12px',
+          fontFamily: 'ui-monospace, monospace',
+          width: '100px',
+          padding: '4px 8px',
+          borderRadius: '6px',
+          background: 'transparent',
+          color: 'inherit',
+          border: '1px solid color-mix(in srgb, '
+            + (valid ? 'currentColor 25%' : 'red 60%') + ', transparent)',
+        },
+      }),
+      h('button', {
+        key: 'r',
+        type: 'button',
+        // `unset` clears this field from the user layer, so the value falls
+        // back to the schema default rather than being written to it. Writing
+        // the default would pin it, and a later change to the default would
+        // then not reach anyone who had ever pressed this.
+        onClick: function () { setDraft(undefined); scope.unset(props.field) },
+        disabled: !writable,
+        style: {
+          font: 'inherit',
+          fontSize: '11px',
+          padding: '3px 8px',
+          borderRadius: '5px',
+          background: 'transparent',
+          color: 'inherit',
+          opacity: 0.6,
+          cursor: 'pointer',
+          border: '1px solid color-mix(in srgb, currentColor 20%, transparent)',
+        },
+      }, 'Reset'),
+    ])
+  }
+
+  return function BackgroundColourCard() {
+    // The scope is an external store already — the same `subscribe`/
+    // `getSnapshot` pair the override subscription uses — so React reads it
+    // directly and a YAML edit re-renders the card for free.
+    var snapshot = React.useSyncExternalStore(
+      function (listener) { return scope.subscribe(listener) },
+      function () { return scope.getSnapshot() },
+    )
+
+    return h('li', {
+      style: {
+        listStyle: 'none',
+        padding: '14px 16px',
+        borderRadius: '10px',
+        border: '1px solid color-mix(in srgb, currentColor 14%, transparent)',
+      },
+    }, [
+      h('div', { key: 't', style: { fontSize: '13px', fontWeight: 500 } }, 'Background Colour'),
+      h('div', { key: 'h', style: { fontSize: '12px', opacity: 0.6, lineHeight: 1.45, padding: '2px 0 8px' } },
+        'One colour per scheme, painted over the frame, the sidebar and the conversation view. '
+        + 'Applies as soon as you leave the box.'),
+      h(Field, { key: 'light', field: 'light', label: 'Light', snapshot: snapshot }),
+      h(Field, { key: 'dark', field: 'dark', label: 'Dark', snapshot: snapshot }),
+    ])
+  }
 }
 
 /**
@@ -149,6 +308,19 @@ function apply(ctx) {
       if (dispose !== undefined) dispose()
     }
   }, 'background-color: theme token override')
+
+  // `slots.inject` rather than a bare register: the cell is declared by the
+  // Plugins section, which may activate after this row. Injecting waits for the
+  // declaration instead of racing it — and a card that loses that race does not
+  // error, it just never appears, which is the worst way to find out.
+  ctx.slots.inject('settings.plugin.item', function () {
+    return ctx.slots.register(
+      // The key IS the namespace. The tab dispatches one cell per registered
+      // namespace and leaves the contents entirely to whoever owns it.
+      { name: 'settings.plugin.item', key: NAMESPACE },
+      makeCard(require('react'), scope),
+    )
+  })
 }
 
 exports.apply = apply

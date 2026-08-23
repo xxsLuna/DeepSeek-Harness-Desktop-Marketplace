@@ -25,12 +25,38 @@ mirror re-reads, and this plugin's subscription re-pushes the override. Defaults
 are `#ffffff` / `#151517`, which are the palette's own `--dsw-alias-bg-base`
 values.
 
-**There is no settings UI, and that is a real limitation, not an omission.** The
-app's Plugins tab lists the intersection of two ledgers — namespaces the host
-serves, and `settings.plugin.item` slot cards that claim them by key. A card is a
-React component, so a namespace with no card is served but never shown. Giving
-this plugin a UI means giving it React and a bundler; the whole point of it is
-that it needs neither.
+## The settings card
+
+**Settings ▸ Plugins ▸ Plugin configuration** shows two hex boxes, one per
+scheme, with a live swatch and a Reset. A colour applies as soon as the box
+loses focus; Enter commits, Escape abandons the draft. Reset uses `unset`, which
+clears the field from the user layer rather than writing the default into it —
+writing it would pin the value, and a later change to the default would then
+never reach anyone who had pressed the button.
+
+The card is here because it turned out to cost almost nothing, which is worth
+saying plainly since this README previously claimed the opposite:
+
+- **React is not a dependency.** The client module system hands it to the
+  bundle's factory through `require`, exactly as the app's own bundles take it
+  as an external. `require('react')` inside the factory is the whole of it.
+- **No bundler.** `React.createElement` instead of JSX keeps this a
+  hand-written classic script, which is the thing this plugin exists to show
+  you can go without.
+
+The one real constraint is that nothing generates a form from the schema —
+there is no schemastery-to-UI renderer anywhere in the app, so a control is
+drawn by whoever owns it. That is also why this is two text boxes and not a
+colour picker with an alpha slider.
+
+The Plugins tab lists the **intersection** of two ledgers: namespaces the host
+serves, and `settings.plugin.item` cards that claim them by key. The key is the
+namespace name, and the tab dispatches one cell per served namespace without
+interpreting any of them — so before this card existed, the `ui-background`
+cell was already being dispatched and simply rendered empty.
+
+Editing the YAML still works and still accepts anything. The box only refuses
+what it cannot show you a swatch of.
 
 ## What it changes, and why three tokens
 
