@@ -17,7 +17,7 @@ applied when you release each one. The values also live in
 ui-liquid-glass:
   blur: 20        # px,  0–60
   saturation: 180 # %,   100–300
-  opacity: 62     # %,   25–100
+  opacity: 45     # %,   25–100
   radius: 20      # px,  0–40
 ```
 
@@ -62,6 +62,13 @@ rather than raised. Glass is brighter than what it sits on. The surface is
 mixed with a little white first, and a sheen fades down the top of each panel;
 between them that is the whole of what makes a panel on a flat backdrop read as
 glass at all.
+
+Lifting the surface changed what a given `opacity` *means*, which the first
+release did not account for: at the old default of 62 the lifted colour
+composites brighter than the palette's own raised-surface token and reads as a
+solid chip — the glass looked switched off. The default is 45, where it lands on
+almost exactly that token, so a panel looks native and is still visibly
+see-through.
 
 ## Why a stylesheet, when the sibling plugin argues against one
 

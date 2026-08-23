@@ -68,7 +68,7 @@
       "name": "dsh-plugin-liquid-glass",
       "displayName": "Liquid Glass",
       "description": "Frosted, translucent panels in the spirit of Apple's Liquid Glass: backdrop blur, a specular top edge and generous corners on the dialogs, the composer and the sidebar.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "author": {
         "name": "xxsLuna",
         "url": "https://github.com/xxsLuna"

@@ -63,7 +63,7 @@ var TAG_ID = 'dsh-plugin-liquid-glass'
 var inject = ['settingsScope', 'connection', 'slots']
 
 /** Falls back to the schema's own defaults until the host registration lands. */
-var FALLBACK = { blur: 20, saturation: 180, opacity: 62, radius: 20 }
+var FALLBACK = { blur: 20, saturation: 180, opacity: 45, radius: 20 }
 
 /**
  * What gets frosted, in the order the card lists them.
@@ -146,7 +146,14 @@ function sheetFor(s) {
   var selectors = ANCHORS.map(function (a) { return a.selector }).join(',\n')
   var blurred = ANCHORS.filter(function (a) { return a.blur }).map(function (a) { return a.selector }).join(',\n')
   return [
-    ':root {',
+    // Declared on `body`, NOT `:root`, and that is load-bearing rather than
+    // stylistic: `--dsw-alias-bg-layer-1` is declared by the palette on `body`,
+    // so a `color-mix` referencing it from `:root` has nothing to resolve and
+    // the whole custom property becomes invalid at computed-value time. In dark
+    // the second block below happens to sit on `body` and covered for it; in
+    // light there was no second block, `--lg-surface` resolved to nothing, and
+    // every panel lost its background. Measured, after shipping it.
+    'body {',
     '  --lg-blur: ' + s.blur + 'px;',
     '  --lg-saturate: ' + s.saturation + '%;',
     '  --lg-opacity: ' + s.opacity + '%;',
@@ -163,7 +170,10 @@ function sheetFor(s) {
     // 42%), and it lands BELOW the composer's own elevated colour, so the
     // composer reads as sunken rather than raised. Glass is brighter than what
     // it sits on; this is what makes it so.
-    '  --lg-surface: color-mix(in srgb, #fff 55%, var(--dsw-alias-bg-layer-1));',
+    // Light: the palette's layer-1 is already #fff, so there is no headroom to
+    // lift into. The panel reads as glass here through the edge, the shadow and
+    // the sheen rather than through being brighter than its backdrop.
+    '  --lg-surface: var(--dsw-alias-bg-layer-1);',
     // A sheen down the top of the panel. On a varied backdrop the blur alone
     // sells the effect; on a flat one — which is what the sidebar and the
     // composer sit on — there is nothing for a blur to reveal, and this

@@ -37,7 +37,12 @@ export const NAMESPACE = settingsNamespace('ui-liquid-glass')
  *   tracing paper. 100 is neutral.
  * - `opacity` below ~25 leaves text sitting on whatever scrolls underneath and
  *   becomes unreadable; 100 is fully opaque, i.e. the plugin's off switch for
- *   translucency alone.
+ *   translucency alone. The default is 45 rather than something rounder because
+ *   the browser half lifts the surface before applying it, and 45% of the
+ *   lifted colour composites to almost exactly the palette's own raised-surface
+ *   token — so the panel looks native and is still visibly see-through. A
+ *   higher number reads as a solid chip, which is what the first release
+ *   shipped and what made the glass look switched off.
  * - `radius` is clamped where the composer's own 22px sits comfortably.
  *
  * The schema clamps because these reach CSS as numbers this plugin composes
@@ -47,7 +52,7 @@ export const NAMESPACE = settingsNamespace('ui-liquid-glass')
 export const GlassSettings = z.object({
   blur: z.number().min(0).max(60).default(20).description('Backdrop blur radius, in pixels.'),
   saturation: z.number().min(100).max(300).default(180).description('Backdrop saturation, as a percentage.'),
-  opacity: z.number().min(25).max(100).default(62).description('Panel opacity, as a percentage.'),
+  opacity: z.number().min(25).max(100).default(45).description('Panel opacity, as a percentage.'),
   radius: z.number().min(0).max(40).default(20).description('Panel corner radius, in pixels.'),
 })
 
