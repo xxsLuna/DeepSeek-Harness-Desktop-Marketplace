@@ -236,12 +236,6 @@ function sheetFor(s) {
     // the platform this imitates has drawn a sidebar since the look was
     // introduced.
     //
-    // The top inset clears the title band rather than guessing at it:
-    // `--dsh-title-band` is published by @dsh-desktop/chrome, and is 0 on a
-    // platform that kept its native title bar, so the same expression is
-    // correct on all of them. The band's own clearance moves from the column's
-    // padding to this margin — left as padding it would stack with the inset
-    // and push the content down twice.
     // OUTER spacing only. An earlier version also zeroed the column's own
     // `padding-top` and moved the title-band clearance into this margin, so
     // that the panel would begin below the band. It looked defensible and it
@@ -294,18 +288,27 @@ function sheetFor(s) {
     'body #dsh-menu-button {',
     '  display: none !important;',
     '}',
-    // Collapsed, the column is only as wide as its icons, and taking 2 x inset
-    // out of that clips them. The state lives in an inline
-    // `grid-template-columns` on the frame, which no selector can see, so the
-    // browser half watches the column and marks the body — see `watchWidth`.
-    // Below the threshold the panel goes back to filling its track exactly.
+    // Collapsed: the gap goes vertical-only, and the rail keeps its corners.
+    //
+    // The state lives in an inline `grid-template-columns` on the frame, which
+    // no selector can see, so the browser half watches for it and marks the
+    // body — see `watchLayout`.
+    //
+    // The HORIZONTAL inset is what cannot survive here. The collapsed track is
+    // 56px and the app lays its icons out at a fixed 11px from the left at 36px
+    // wide, so the panel needs 47 of those 56 — measured — and 8px a side
+    // leaves 40 and clips six buttons by 7px each. Even 4px a side fits with
+    // exactly 1px to spare, which is not a margin of safety, it is a bet on
+    // upstream never touching that padding.
+    //
+    // Vertical costs nothing: the column is full height and has room to give at
+    // the top and bottom, so the rail still reads as a pane sitting on the
+    // window rather than lining its edge, and nothing can be clipped by it.
     'body[data-lg-narrow] ' + ANCHORS[2].selector + ' {',
-    '  margin: 0 !important;',
-    '  border-radius: 0 !important;',
+    '  margin: var(--lg-inset) 0 !important;',
+    // Flush to the left edge, so the border there would be a line against the
+    // window rather than the side of a pane.
     '  border-left-color: transparent !important;',
-    // No inset here, so nothing was pushed down and there is nothing to pull
-    // back up: the band's full clearance is correct again.
-    '  padding-top: var(--dsh-title-band, 0px) !important;',
     '}',
     // The app writes an explicit pixel width inline on the sidebar's inner root
     // — it is a resizable column, so JS owns that number — and that width is

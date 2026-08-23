@@ -138,9 +138,14 @@ re-measures once per session and settles about `2 × inset` narrower than before
 It does not accumulate across restarts — each boot starts from the app's own
 width — but `inset: 0` is there for anyone who wants every pixel back.
 
-**Collapsed, the inset is dropped entirely.** The collapsed column is only as
-wide as its icons and has nothing to give away; taking `2 × inset` out of it
-clipped six of them by 7px. The state lives in an inline
+**Collapsed, the gap goes vertical-only.** The collapsed column is 56px and the
+app lays its icons out at a fixed 11px from the left at 36px wide, so the panel
+needs 47 of those 56 — measured. Insetting it 8px a side leaves 40 and clips six
+buttons by 7px each; even 4px a side fits with exactly 1px to spare, which is
+not a margin of safety but a bet on upstream never touching that padding. The
+column is full height, though, so it can give at the top and bottom for free:
+the rail keeps its rounded corners and its 8px above and below, flush to the
+left edge, and nothing can be clipped by it. The state lives in an inline
 `grid-template-columns` on the frame — no class, no attribute, nothing a
 selector can see — so the browser half watches for it and marks `body`, and the
 stylesheet keys off that mark.
