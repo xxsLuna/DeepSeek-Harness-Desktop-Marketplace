@@ -1,0 +1,10 @@
+# The one row this plugin composes, appended after the app's own rows as a
+# profile-bundle patch layer. Same shape as every other marketplace plugin:
+# `id` and `name` are both the package name, because the Loader resolves a row
+# by `import(options.name)` and the client-module scan matches `dsh.client`
+# against that same string, while a duplicate `id` anywhere in the composed
+# tree stops the app from starting.
+
+- insert:
+    - id: dsh-plugin-liquid-glass
+      name: dsh-plugin-liquid-glass

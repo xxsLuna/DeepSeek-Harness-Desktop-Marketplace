@@ -15,12 +15,21 @@
       "displayName": "Plugin Authoring",
       "description": "How to write, list and get a plugin into this marketplace: the two formats, what each can reach, and the rules CI enforces.",
       "version": "0.1.0",
-      "author": { "name": "xxsLuna", "url": "https://github.com/xxsLuna" },
+      "author": {
+        "name": "xxsLuna",
+        "url": "https://github.com/xxsLuna"
+      },
       "homepage": "https://github.com/xxsLuna/DeepSeek-Harness-Desktop-Marketplace",
       "license": "MIT",
       "category": "development",
-      "keywords": ["plugin", "authoring", "marketplace"],
-      "metadata": { "kind": "claude" },
+      "keywords": [
+        "plugin",
+        "authoring",
+        "marketplace"
+      ],
+      "metadata": {
+        "kind": "claude"
+      },
       "source": {
         "source": "git-subdir",
         "repo": "xxsLuna/DeepSeek-Harness-Desktop-Marketplace",
@@ -33,16 +42,53 @@
       "displayName": "Background Colour",
       "description": "Repaint the window frame, sidebar and conversation view with one colour per light and dark scheme.",
       "version": "0.1.0",
-      "author": { "name": "xxsLuna", "url": "https://github.com/xxsLuna" },
+      "author": {
+        "name": "xxsLuna",
+        "url": "https://github.com/xxsLuna"
+      },
       "homepage": "https://github.com/xxsLuna/DeepSeek-Harness-Desktop-Marketplace",
       "license": "MIT",
       "category": "appearance",
-      "keywords": ["theme", "colour", "appearance"],
-      "metadata": { "kind": "dsh" },
+      "keywords": [
+        "theme",
+        "colour",
+        "appearance"
+      ],
+      "metadata": {
+        "kind": "dsh"
+      },
       "source": {
         "source": "git-subdir",
         "repo": "xxsLuna/DeepSeek-Harness-Desktop-Marketplace",
         "path": "plugins/dsh-plugin-background-color",
+        "ref": "main"
+      }
+    },
+    {
+      "name": "dsh-plugin-liquid-glass",
+      "displayName": "Liquid Glass",
+      "description": "Frosted, translucent panels in the spirit of Apple's Liquid Glass: backdrop blur, a specular top edge and generous corners on the dialogs, the composer and the sidebar.",
+      "version": "0.1.0",
+      "author": {
+        "name": "xxsLuna",
+        "url": "https://github.com/xxsLuna"
+      },
+      "homepage": "https://github.com/xxsLuna/DeepSeek-Harness-Desktop-Marketplace",
+      "license": "MIT",
+      "category": "appearance",
+      "keywords": [
+        "theme",
+        "appearance",
+        "glass",
+        "blur"
+      ],
+      "metadata": {
+        "kind": "dsh"
+      },
+      "source": {
+        "source": "git-subdir",
+        "repo": "xxsLuna/DeepSeek-Harness-Desktop-Marketplace",
+        "path": "plugins/dsh-plugin-liquid-glass",
         "ref": "main"
       }
     }

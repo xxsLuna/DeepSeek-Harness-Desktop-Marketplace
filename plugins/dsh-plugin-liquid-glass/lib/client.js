@@ -1,0 +1,416 @@
+// @ts-check
+/**
+ * dsh-plugin-liquid-glass — browser half: the stylesheet, and the card that
+ * tunes it.
+ *
+ * Hand-written and shaped exactly like a built bundle, the same way
+ * `dsh-plugin-background-color` is: the wrapper below is what
+ * `scripts/build-client.mjs` emits in the desktop repo, with this package's id
+ * substituted. It MUST stay a classic script — the client module system loads a
+ * bundle with `document.createElement('script')` and then asserts the file
+ * registered a factory synchronously, which an ES module would defer past.
+ *
+ * ## Why a stylesheet and not theme tokens
+ *
+ * `dsh-plugin-background-color` argues, correctly, that `overrideTokens` beats
+ * CSS injection: the presenter writes tokens as inline custom properties on
+ * `body`, which outranks the palette's own declarations with no specificity
+ * argument to lose. That argument holds for *colours*, and only for colours.
+ *
+ * Glass is not a colour. `backdrop-filter`, a specular inset highlight, a
+ * corner radius and a shadow are properties on the panels themselves, and no
+ * token carries any of them. So this one injects a sheet — which upstream's own
+ * client bundles also do (they tag theirs `data-plugin`, and this follows that
+ * convention so the source of a rule is findable in the inspector).
+ *
+ * The cost is real and worth naming: an injected sheet has to out-specify
+ * CSS-module rules on the very elements it is restyling, so the declarations
+ * carry `!important`. That is a blunt instrument. It is confined to the four
+ * properties that make the effect and never touches layout, so a rule that
+ * loses is a panel that looks ordinary rather than a window that breaks.
+ *
+ * ## Why the anchors are declared rather than inlined
+ *
+ * Two of the three selectors are semantic and durable — `[role="dialog"]` is
+ * ARIA, `[data-composer-card]` is a hook upstream put there on purpose. The
+ * third is not: the sidebar column is only reachable through the hashed local
+ * name its CSS module generates, and that string changes whenever upstream
+ * renames the class. A stylesheet that quietly stops matching is exactly the
+ * silent breakage this project keeps pinning in tests, and a plugin cannot add
+ * a test to the app — so instead every anchor is named, counted at render time,
+ * and reported in the settings card. When the sidebar stops frosting, the card
+ * says `sidebar — no match` rather than leaving you to wonder.
+ */
+window.__ModuleLoader__.load({ id: "dsh-plugin-liquid-glass", factory: (require) => {
+var module = { exports: {} }; var exports = module.exports;
+
+/** Must equal the host half's `settingsNamespace('ui-liquid-glass')`. */
+var NAMESPACE = 'ui-liquid-glass'
+
+/** Identifies our `<style>` tag, and matches upstream's `data-plugin` convention. */
+var TAG_ID = 'dsh-plugin-liquid-glass'
+
+/**
+ * Cordis SERVICE names — a different namespace from the package names in
+ * `dsh.client.inject`, and the two are easy to confuse.
+ *
+ * `connection` is here because `settingsScope.bind()` reads it off the calling
+ * context to reach the settings wire. It is deliberately NOT in
+ * `dsh.client.inject`: on the desktop shell the upstream `connection` row is
+ * disabled and `@dsh-desktop/connection` provides the service instead, so the
+ * service name is portable across surfaces and the package name is not.
+ */
+var inject = ['settingsScope', 'connection', 'slots']
+
+/** Falls back to the schema's own defaults until the host registration lands. */
+var FALLBACK = { blur: 20, saturation: 180, opacity: 62, radius: 20 }
+
+/**
+ * What gets frosted, in the order the card lists them.
+ *
+ * `stable: false` is the honest label on an anchor that depends on a string
+ * upstream did not promise. Everything about how this degrades — the card's
+ * warning, the "no match" line — reads from this flag rather than from a
+ * comment nobody will re-check.
+ */
+var ANCHORS = [
+  {
+    id: 'dialog',
+    label: 'Dialogs',
+    selector: '[role="dialog"]',
+    stable: true,
+    blur: true,
+    note: 'ARIA, so upstream cannot rename it without breaking screen readers too.',
+  },
+  {
+    id: 'composer',
+    label: 'Composer',
+    selector: '[data-composer-card]',
+    stable: true,
+    blur: true,
+    note: 'A hook upstream added deliberately.',
+  },
+  {
+    id: 'sidebar',
+    label: 'Sidebar',
+    selector: '[class*="sidebarCol"]',
+    stable: false,
+    // NOT a preference, and not a thing to "fix" by switching it on. An element
+    // with `backdrop-filter` becomes the containing block for every
+    // position:fixed descendant, and the Settings dialog is rendered INSIDE the
+    // sidebar — its overlay hangs off the Settings button in the sidebar
+    // footer rather than being portalled to the body. Blurring this column
+    // therefore reparents that fixed overlay onto a 280px box and the whole
+    // Settings dialog collapses into the sidebar's width. Measured, not feared.
+    //
+    // Nothing is lost by leaving it off: the sidebar sits on the flat window
+    // frame, so there is no content behind it for a blur to reveal. It keeps
+    // the translucency, the specular edge and the rounded inner corner, which
+    // is the entire visible effect here.
+    blur: false,
+    note: 'Matches a hashed CSS-module local name; an upstream rename silently unfrosts it.',
+  },
+]
+
+/**
+ * Read the four numbers out of a settings-scope snapshot.
+ * @param {any} snapshot - the scope snapshot from `getSnapshot()`.
+ * @returns {{blur: number, saturation: number, opacity: number, radius: number}} the values to render.
+ */
+function readSettings(snapshot) {
+  var value = snapshot && snapshot.status === 'ready' ? snapshot.value : undefined
+  var out = {}
+  for (var key in FALLBACK) {
+    var candidate = value === undefined ? undefined : value[key]
+    out[key] = typeof candidate === 'number' && isFinite(candidate) ? candidate : FALLBACK[key]
+  }
+  return /** @type {any} */ (out)
+}
+
+/**
+ * Compose the stylesheet.
+ *
+ * Everything variable is a custom property on `:root`, so the rules below are
+ * constant text and only the four numbers change — which also means the
+ * effect can be inspected and poked at in devtools without going through this
+ * plugin at all.
+ *
+ * The scheme split is `body[data-ds-dark-theme]`, the same selector the shipped
+ * palette uses for its own dark declarations. A specular highlight that reads
+ * as glass on a dark panel is a white haze on a light one, so the two schemes
+ * get different highlight strengths rather than one compromise.
+ * @param {{blur: number, saturation: number, opacity: number, radius: number}} s - the current settings.
+ * @returns {string} the sheet.
+ */
+function sheetFor(s) {
+  var selectors = ANCHORS.map(function (a) { return a.selector }).join(',\n')
+  var blurred = ANCHORS.filter(function (a) { return a.blur }).map(function (a) { return a.selector }).join(',\n')
+  return [
+    ':root {',
+    '  --lg-blur: ' + s.blur + 'px;',
+    '  --lg-saturate: ' + s.saturation + '%;',
+    '  --lg-opacity: ' + s.opacity + '%;',
+    '  --lg-radius: ' + s.radius + 'px;',
+    // Light scheme: the panel sits on pale surfaces, so the edge is a thin grey
+    // rather than white, which would be invisible.
+    '  --lg-edge: color-mix(in srgb, #000 12%, transparent);',
+    '  --lg-specular: color-mix(in srgb, #fff 70%, transparent);',
+    '  --lg-shadow: 0 10px 34px color-mix(in srgb, #000 14%, transparent);',
+    '}',
+    'body[data-ds-dark-theme] {',
+    '  --lg-edge: color-mix(in srgb, #fff 12%, transparent);',
+    '  --lg-specular: color-mix(in srgb, #fff 24%, transparent);',
+    '  --lg-shadow: 0 12px 40px color-mix(in srgb, #000 45%, transparent);',
+    '}',
+    selectors + ' {',
+    // The panel keeps its own colour and only loses opacity, so this follows
+    // the palette (and anything overriding it, such as the background-colour
+    // plugin) instead of imposing a colour of its own.
+    '  background-color: color-mix(in srgb, var(--dsw-alias-bg-layer-1) var(--lg-opacity), transparent) !important;',
+    '  border: 1px solid var(--lg-edge) !important;',
+    '  border-radius: var(--lg-radius) !important;',
+    // Two shadows: the outer one lifts the panel off what is behind it, the
+    // inset hairline along the top is the specular edge that makes it read as
+    // a physical sheet rather than a translucent rectangle.
+    '  box-shadow: var(--lg-shadow), inset 0 1px 0 var(--lg-specular) !important;',
+    '}',
+    // The blur is a SEPARATE rule, over a subset, and the split is load-bearing.
+    // `backdrop-filter` makes an element the containing block for every
+    // position:fixed descendant, so putting it on a panel that hosts one
+    // reparents that panel's overlay and collapses it. See the `blur` flag on
+    // ANCHORS for the case that proved it.
+    blurred + ' {',
+    '  backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) !important;',
+    '  -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) !important;',
+    '}',
+    // The sidebar is a full-height column, so rounding all four corners would
+    // leave gaps against the window edge. Only the inner edge is rounded.
+    ANCHORS[2].selector + ' {',
+    '  border-radius: 0 var(--lg-radius) var(--lg-radius) 0 !important;',
+    '  border-left: none !important;',
+    '}',
+    // Motion is part of the look, but only for people who have not asked for
+    // less of it.
+    '@media (prefers-reduced-motion: no-preference) {',
+    '  ' + selectors + ' { transition: background-color 160ms ease, box-shadow 160ms ease; }',
+    '}',
+  ].join('\n')
+}
+
+/**
+ * Install or replace the sheet.
+ * @param {string} css - the composed stylesheet.
+ * @returns {() => void} a disposer that removes it again.
+ */
+function installSheet(css) {
+  var tag = document.querySelector('style[data-plugin-css=' + JSON.stringify(TAG_ID) + ']')
+  if (tag === null) {
+    tag = document.createElement('style')
+    tag.setAttribute('data-plugin', TAG_ID)
+    tag.setAttribute('data-plugin-css', TAG_ID)
+    document.head.appendChild(tag)
+  }
+  tag.textContent = css
+  var installed = tag
+  return function () {
+    // Removed rather than emptied: an empty sheet left in the document is a
+    // thing the next reader has to rule out, and uninstall should leave no
+    // trace of a plugin that is gone.
+    if (installed.parentNode !== null) installed.parentNode.removeChild(installed)
+  }
+}
+
+/**
+ * The settings card: four numbers, and an honest report on the anchors.
+ * @param {any} React - the React namespace, from the factory's `require`.
+ * @param {any} scope - the bound settings scope for this namespace.
+ * @returns {() => any} the card component.
+ */
+function makeCard(React, scope) {
+  var h = React.createElement
+
+  var FIELDS = [
+    { field: 'blur', label: 'Blur', min: 0, max: 60, suffix: 'px' },
+    { field: 'saturation', label: 'Saturation', min: 100, max: 300, suffix: '%' },
+    { field: 'opacity', label: 'Opacity', min: 25, max: 100, suffix: '%' },
+    { field: 'radius', label: 'Corner', min: 0, max: 40, suffix: 'px' },
+  ]
+
+  /**
+   * One slider plus its number, both writing the same field.
+   * @param {any} props - the field spec and the current snapshot.
+   * @returns the row.
+   */
+  function Row(props) {
+    var stored = readSettings(props.snapshot)[props.field]
+    var writable = props.snapshot && props.snapshot.writable === true
+    // The slider writes on release rather than on every pixel of the drag:
+    // each write is a round trip to the host and a document commit, and a drag
+    // would queue a hundred of them to reach the value you stopped at.
+    var liveState = React.useState(undefined)
+    var live = liveState[0]
+    var setLive = liveState[1]
+    var shown = live === undefined ? stored : live
+
+    var commit = function (next) {
+      setLive(undefined)
+      if (next !== stored) scope.set(props.field, next)
+    }
+
+    return h('label', {
+      style: { display: 'flex', alignItems: 'center', gap: '10px', padding: '5px 0', fontSize: '13px' },
+    }, [
+      h('span', { key: 'l', style: { width: '76px', opacity: 0.7 } }, props.label),
+      h('input', {
+        key: 'r',
+        type: 'range',
+        min: props.min,
+        max: props.max,
+        value: shown,
+        disabled: !writable,
+        onChange: function (e) { setLive(Number(e.target.value)) },
+        onMouseUp: function (e) { commit(Number(e.target.value)) },
+        onKeyUp: function (e) { commit(Number(e.target.value)) },
+        style: { flex: '1 1 auto', accentColor: 'currentColor', minWidth: 0 },
+      }),
+      h('span', {
+        key: 'v',
+        style: {
+          width: '54px',
+          textAlign: 'right',
+          fontFamily: 'ui-monospace, monospace',
+          fontSize: '12px',
+          opacity: 0.75,
+          fontVariantNumeric: 'tabular-nums',
+        },
+      }, String(shown) + props.suffix),
+    ])
+  }
+
+  return function LiquidGlassCard() {
+    var snapshot = React.useSyncExternalStore(
+      function (listener) { return scope.subscribe(listener) },
+      function () { return scope.getSnapshot() },
+    )
+
+    // Counted at render time rather than once at install: a dialog only exists
+    // while it is open, and this card is itself inside one — so the dialog
+    // anchor reporting a match is the card looking at its own container.
+    var health = ANCHORS.map(function (a) {
+      var found = document.querySelectorAll(a.selector)
+      // A blurred panel that has grown a position:fixed descendant is the
+      // failure that collapsed the Settings dialog once already: the blur makes
+      // the panel that descendant's containing block. Upstream can introduce
+      // one at any time by moving where an overlay mounts, so it is checked
+      // here rather than assumed to stay true.
+      var trapped = 0
+      if (a.blur) {
+        for (var i = 0; i < found.length; i += 1) {
+          var inner = found[i].querySelectorAll('*')
+          for (var j = 0; j < inner.length; j += 1) {
+            if (getComputedStyle(inner[j]).position === 'fixed') { trapped += 1; break }
+          }
+        }
+      }
+      return { a: a, n: found.length, trapped: trapped }
+    })
+    var missing = health.filter(function (row) { return row.n === 0 && !row.a.stable })
+    var trapping = health.filter(function (row) { return row.trapped > 0 })
+
+    return h('li', {
+      style: {
+        listStyle: 'none',
+        padding: '14px 16px',
+        borderRadius: '10px',
+        border: '1px solid color-mix(in srgb, currentColor 14%, transparent)',
+      },
+    }, [
+      h('div', { key: 't', style: { fontSize: '13px', fontWeight: 500 } }, 'Liquid Glass'),
+      h('div', { key: 'h', style: { fontSize: '12px', opacity: 0.6, lineHeight: 1.45, padding: '2px 0 8px' } },
+        'Frosted panels over what is behind them. Applies as you release each slider.'),
+      h('div', { key: 'f' }, FIELDS.map(function (f) {
+        return h(Row, {
+          key: f.field, field: f.field, label: f.label,
+          min: f.min, max: f.max, suffix: f.suffix, snapshot: snapshot,
+        })
+      })),
+      h('div', {
+        key: 'a',
+        style: { fontSize: '11px', opacity: 0.55, lineHeight: 1.5, paddingTop: '8px' },
+      }, health.map(function (row) {
+        return h('div', { key: row.a.id },
+          row.a.label + ' — ' + (row.n === 0 ? 'no match' : row.n + ' matched')
+          + (row.a.blur ? '' : ', no blur')
+          + (row.a.stable ? '' : ' (fragile selector)'))
+      })),
+      missing.length === 0 ? null : h('div', {
+        key: 'w',
+        style: { fontSize: '11px', lineHeight: 1.5, paddingTop: '6px', opacity: 0.85 },
+      }, 'An upstream rename has unfrosted: ' + missing.map(function (row) { return row.a.label }).join(', ')
+        + '. Everything else still works; this plugin needs a new selector.'),
+      trapping.length === 0 ? null : h('div', {
+        key: 'x',
+        style: { fontSize: '11px', lineHeight: 1.5, paddingTop: '6px', opacity: 0.85 },
+      }, 'Blur is trapping a floating panel inside: '
+        + trapping.map(function (row) { return row.a.label }).join(', ')
+        + '. Anything that floats out of it will be clipped to its box — that anchor needs its blur turned off.'),
+    ])
+  }
+}
+
+/**
+ * Bind the namespace, keep the sheet in step with it, and offer the card.
+ * @param {any} ctx - client cordis context.
+ */
+function apply(ctx) {
+  // At apply level rather than inside the effect: `bind()` registers its own
+  // teardown on the calling fiber, so the scope is already tied to this
+  // plugin's lifetime.
+  var scope = ctx.settingsScope.bind({ namespace: NAMESPACE })
+
+  ctx.effect(function () {
+    /** Removes whatever sheet is currently installed. */
+    var remove
+    /** Last sheet written, so an unrelated settings change costs no DOM work. */
+    var applied
+
+    var push = function () {
+      var css = sheetFor(readSettings(scope.getSnapshot()))
+      if (css === applied) return
+      applied = css
+      remove = installSheet(css)
+    }
+
+    push()
+    // What makes the host's `applies: 'live'` true: nothing re-applies anything
+    // on our behalf, so this subscription is the live path. Editing
+    // `$DSH_HOME/settings.yaml` reaches here without a reload.
+    var off = scope.subscribe(push)
+
+    return function () {
+      off()
+      // Uninstall, disable and reload all leave the document as they found it.
+      if (remove !== undefined) remove()
+    }
+  }, 'liquid-glass: stylesheet')
+
+  // `slots.inject` rather than a bare register: the cell is declared by the
+  // Plugin configuration tab and only exists while that tab is mounted, so
+  // injecting waits for the declaration instead of losing a race it would
+  // report as nothing at all.
+  ctx.slots.inject('settings.plugin.item', function () {
+    return ctx.slots.register(
+      // The key is the namespace: the tab dispatches one cell per served
+      // namespace and leaves the contents entirely to whoever owns it.
+      { name: 'settings.plugin.item', key: NAMESPACE },
+      makeCard(require('react'), scope),
+    )
+  })
+}
+
+exports.apply = apply
+exports.inject = inject
+exports.NAMESPACE = NAMESPACE
+exports.ANCHORS = ANCHORS
+
+return module.exports; } });
