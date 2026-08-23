@@ -32,6 +32,37 @@ blur is a typo, not a taste.
 Set `opacity: 100` for the panels without the translucency, or `blur: 0` for
 translucency without the blur.
 
+**Reset to defaults** clears all four with `unset` rather than writing the
+current defaults back in. Writing them would pin today's numbers into your
+document, and a later change to a default would then never reach you — the
+button would quietly mean "freeze these forever". It greys out when nothing is
+overridden, so it also answers "have I changed anything?".
+
+## Why the blur only shows on dialogs
+
+Because a blur can only reveal what is behind it, and only one of the three
+panels has anything varied back there. Measured in a running window, dark
+scheme:
+
+| Panel | Directly behind it |
+| --- | --- |
+| Dialog | a `rgba(0,0,0,.5)` scrim, and under that **the conversation** |
+| Composer | the conversation root — flat `#151517` |
+| Sidebar | the window frame — flat `#151517` |
+
+Blurring a flat colour returns that same flat colour. So on the composer and
+the sidebar the blur is doing exactly what it is asked to and producing nothing
+visible, which is why they are the two that look untouched.
+
+That is also why the surface is **lifted before it is made translucent**. Mixing
+the plain `--dsw-alias-bg-layer-1` down over the frame lands on `#1b1b1c` at 42%
+opacity — byte-identical to the colour the sidebar already was, and *darker*
+than the composer's own elevated `#2c2c2e`, so the composer read as sunken
+rather than raised. Glass is brighter than what it sits on. The surface is
+mixed with a little white first, and a sheen fades down the top of each panel;
+between them that is the whole of what makes a panel on a flat backdrop read as
+glass at all.
+
 ## Why a stylesheet, when the sibling plugin argues against one
 
 `dsh-plugin-background-color` makes the case that `overrideTokens` beats CSS

@@ -156,17 +156,36 @@ function sheetFor(s) {
     '  --lg-edge: color-mix(in srgb, #000 12%, transparent);',
     '  --lg-specular: color-mix(in srgb, #fff 70%, transparent);',
     '  --lg-shadow: 0 10px 34px color-mix(in srgb, #000 14%, transparent);',
+    // The surface is LIFTED off the token before it is made translucent, and
+    // that is not a taste — without it the effect is invisible or backwards.
+    // Composited over the window frame, the plain token lands on exactly the
+    // colour the sidebar already was (measured: #1b1b1c on #1b1b1c in dark at
+    // 42%), and it lands BELOW the composer's own elevated colour, so the
+    // composer reads as sunken rather than raised. Glass is brighter than what
+    // it sits on; this is what makes it so.
+    '  --lg-surface: color-mix(in srgb, #fff 55%, var(--dsw-alias-bg-layer-1));',
+    // A sheen down the top of the panel. On a varied backdrop the blur alone
+    // sells the effect; on a flat one — which is what the sidebar and the
+    // composer sit on — there is nothing for a blur to reveal, and this
+    // gradient is the whole of what makes them read as glass rather than as a
+    // slightly different rectangle.
+    '  --lg-sheen: color-mix(in srgb, #fff 45%, transparent);',
     '}',
     'body[data-ds-dark-theme] {',
     '  --lg-edge: color-mix(in srgb, #fff 12%, transparent);',
     '  --lg-specular: color-mix(in srgb, #fff 24%, transparent);',
     '  --lg-shadow: 0 12px 40px color-mix(in srgb, #000 45%, transparent);',
+    '  --lg-surface: color-mix(in srgb, #fff 8%, var(--dsw-alias-bg-layer-1));',
+    '  --lg-sheen: color-mix(in srgb, #fff 7%, transparent);',
     '}',
     selectors + ' {',
     // The panel keeps its own colour and only loses opacity, so this follows
     // the palette (and anything overriding it, such as the background-colour
     // plugin) instead of imposing a colour of its own.
-    '  background-color: color-mix(in srgb, var(--dsw-alias-bg-layer-1) var(--lg-opacity), transparent) !important;',
+    '  background-color: color-mix(in srgb, var(--lg-surface) var(--lg-opacity), transparent) !important;',
+    // Sheen over the tint, fading out by 40% of the panel's height. Not a
+    // decoration: it is what a panel on a flat backdrop has instead of a blur.
+    '  background-image: linear-gradient(to bottom, var(--lg-sheen), transparent 40%) !important;',
     '  border: 1px solid var(--lg-edge) !important;',
     '  border-radius: var(--lg-radius) !important;',
     // Two shadows: the outer one lifts the panel off what is behind it, the
@@ -317,6 +336,14 @@ function makeCard(React, scope) {
     var missing = health.filter(function (row) { return row.n === 0 && !row.a.stable })
     var trapping = health.filter(function (row) { return row.trapped > 0 })
 
+    // Which fields the user layer actually carries. Read from `user` rather
+    // than compared against the defaults: a value deliberately set to the
+    // default is still a value the user wrote, and Reset should clear it.
+    var userLayer = snapshot && snapshot.user !== undefined && snapshot.user !== null ? snapshot.user : {}
+    var overridden = FIELDS
+      .map(function (f) { return f.field })
+      .filter(function (field) { return userLayer[field] !== undefined })
+
     return h('li', {
       style: {
         listStyle: 'none',
@@ -325,7 +352,43 @@ function makeCard(React, scope) {
         border: '1px solid color-mix(in srgb, currentColor 14%, transparent)',
       },
     }, [
-      h('div', { key: 't', style: { fontSize: '13px', fontWeight: 500 } }, 'Liquid Glass'),
+      h('div', {
+        key: 't',
+        style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' },
+      }, [
+        h('span', { key: 'n', style: { fontSize: '13px', fontWeight: 500 } }, 'Liquid Glass'),
+        h('button', {
+          key: 'r',
+          type: 'button',
+          // Disabled when nothing is overridden, so the button also answers
+          // "have I changed anything?" without needing to remember the
+          // defaults. `snapshot.user` is the user layer alone, which is exactly
+          // that question.
+          disabled: overridden.length === 0 || !(snapshot && snapshot.writable === true),
+          // `unset` per field, not a write of the default values. Writing them
+          // would pin today's defaults into the user's document, and a later
+          // change to a default would then never reach anyone who had pressed
+          // this — the button would quietly become "freeze the current
+          // defaults forever".
+          onClick: function () {
+            for (var i = 0; i < overridden.length; i += 1) scope.unset(overridden[i])
+          },
+          title: overridden.length === 0
+            ? 'Everything is already at its default'
+            : 'Clear ' + overridden.join(', '),
+          style: {
+            font: 'inherit',
+            fontSize: '11px',
+            padding: '3px 9px',
+            borderRadius: '5px',
+            background: 'transparent',
+            color: 'inherit',
+            opacity: overridden.length === 0 ? 0.35 : 0.75,
+            cursor: overridden.length === 0 ? 'default' : 'pointer',
+            border: '1px solid color-mix(in srgb, currentColor 20%, transparent)',
+          },
+        }, 'Reset to defaults'),
+      ]),
       h('div', { key: 'h', style: { fontSize: '12px', opacity: 0.6, lineHeight: 1.45, padding: '2px 0 8px' } },
         'Frosted panels over what is behind them. Applies as you release each slider.'),
       h('div', { key: 'f' }, FIELDS.map(function (f) {
