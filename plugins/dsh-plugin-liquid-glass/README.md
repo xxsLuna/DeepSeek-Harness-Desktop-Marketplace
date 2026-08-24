@@ -138,14 +138,18 @@ re-measures once per session and settles about `2 × inset` narrower than before
 It does not accumulate across restarts — each boot starts from the app's own
 width — but `inset: 0` is there for anyone who wants every pixel back.
 
-**Collapsed, the gap goes vertical-only.** The collapsed column is 56px and the
-app lays its icons out at a fixed 11px from the left at 36px wide, so the panel
-needs 47 of those 56 — measured. Insetting it 8px a side leaves 40 and clips six
-buttons by 7px each; even 4px a side fits with exactly 1px to spare, which is
-not a margin of safety but a bet on upstream never touching that padding. The
-column is full height, though, so it can give at the top and bottom for free:
-the rail keeps its rounded corners and its 8px above and below, flush to the
-left edge, and nothing can be clipped by it. The state lives in an inline
+**Collapsed, the side gap is measured rather than chosen.** The rail is only as
+wide as its icons, so it cannot simply be given the same inset: the collapsed
+track is 56px and the icons need 47 of it, and 8px a side leaves 40 and clips
+six buttons by 7px each. Picking a constant is a trap too — 4px fits with
+exactly 1px to spare, which is not a margin of safety but a bet on upstream
+never changing that offset, and it would be lost silently as clipped icons.
+
+So the browser half measures how much room the icons actually occupy and insets
+by half of whatever the track has left, capped at the value you set. In practice
+that lands on 3–4px, the rail floats on all four sides, and if the icons ever
+grow to fill it the gap shrinks to nothing on its own. Vertically it gets the
+full inset either way — the column is full height and has room to give. The state lives in an inline
 `grid-template-columns` on the frame — no class, no attribute, nothing a
 selector can see — so the browser half watches for it and marks `body`, and the
 stylesheet keys off that mark.
