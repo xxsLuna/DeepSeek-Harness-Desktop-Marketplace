@@ -294,19 +294,49 @@ function sheetFor(s) {
     // no selector can see, so the browser half watches for it and marks the
     // body — see `watchLayout`.
     //
-    // Vertically it gets the full inset — the column is full height and has room
-    // to give. Horizontally it gets `--lg-inset-narrow`, which the browser half
-    // MEASURES: the rail is only as wide as its icons, so the gap is whatever
-    // the track has left over once they fit, capped at what the user asked for.
+    // Vertically the box is inset as usual — the column is full height and has
+    // room to give. Horizontally it is NOT, and the glass is painted inset
+    // instead, on a pseudo-element.
     //
-    // That number is measured rather than chosen because the obvious constant
-    // is a trap. The collapsed track is 56px and the icons need 47 of it, so
-    // 4px a side fits with exactly 1px to spare — which is not a margin of
-    // safety, it is a bet on upstream never changing that offset, lost silently
-    // as clipped icons. Measuring adapts instead, down to no gap at all if the
-    // icons ever fill the rail.
+    // The box cannot shrink sideways here, because the box is what clips. The
+    // collapsed track is 56px, the icons occupy 11 to 47 of it, and
+    // `overflow: hidden` cuts whatever is past the edge — so 8px a side leaves
+    // 40 and takes 7px off six icons. No margin both shows and fits: 4px a side
+    // is the most that clears, with 1px to spare, and 1px is what a fractional
+    // device pixel ratio or a focus ring eats. Measuring the leftover and
+    // splitting it was tried and lands in the same place less predictably — it
+    // produced a 1px gap, and a visible sideways twitch while the number
+    // settled mid-animation.
+    //
+    // Painting solves it outright. The icons need 11–47, the glass is drawn at
+    // 8–48, and they sit comfortably inside it. Nothing is clipped because
+    // nothing was narrowed.
+    //
+    // `isolation: isolate` is what makes `z-index: -1` safe: without a stacking
+    // context of its own the pseudo sinks behind the frame's opaque background
+    // and disappears, and with one it stays behind the column's content and in
+    // front of the window. It costs nothing here — it would suppress a
+    // `backdrop-filter`, and this anchor deliberately has none.
     'body[data-lg-narrow] ' + ANCHORS[2].selector + ' {',
-    '  margin: var(--lg-inset) var(--lg-inset-narrow, 0px) !important;',
+    '  margin: var(--lg-inset) 0 !important;',
+    '  position: relative !important;',
+    '  isolation: isolate !important;',
+    '  background: none !important;',
+    '  border-color: transparent !important;',
+    '  box-shadow: none !important;',
+    '}',
+    'body[data-lg-narrow] ' + ANCHORS[2].selector + '::before {',
+    "  content: '' !important;",
+    '  position: absolute !important;',
+    '  inset: 0 var(--lg-inset) !important;',
+    '  z-index: -1 !important;',
+    '  pointer-events: none !important;',
+    '  border-radius: var(--lg-radius) !important;',
+    '  border: 1px solid var(--lg-edge) !important;',
+    '  border-top-color: transparent !important;',
+    '  background-color: color-mix(in srgb, var(--lg-surface) var(--lg-opacity), transparent) !important;',
+    '  background-image: linear-gradient(to bottom, var(--lg-sheen), transparent 40%) !important;',
+    '  box-shadow: var(--lg-shadow) !important;',
     '}',
     // The app writes an explicit pixel width inline on the sidebar's inner root
     // — it is a resizable column, so JS owns that number — and that width is
@@ -407,6 +437,7 @@ var NARROW_PX = 140
  */
 var SETTLE_MS = 400
 
+
 /**
  * Mark the body while the sidebar is collapsed.
  *
@@ -435,42 +466,6 @@ function watchLayout(frame) {
   /** Pending re-read once the collapse animation has settled. */
   var settle = 0
 
-  /**
-   * How much side inset the collapsed rail can actually afford.
-   *
-   * Measured rather than chosen. The rail is only as wide as its icons, and how
-   * much room they need is the app's business — it lays them out at a fixed
-   * offset from the left, so the space they occupy is a number this can read
-   * off the layout instead of hard-coding. Whatever the track has left over,
-   * halved, is the gap; if that is less than the user asked for they get the
-   * smaller one, and if the icons fill the rail completely they get none.
-   *
-   * The alternative was picking a constant. 4px happens to fit today with
-   * exactly 1px to spare, which is not a margin, it is a bet on upstream never
-   * changing that offset — and it would be lost silently, as clipped icons.
-   * @param {number} track - the collapsed track width, in pixels.
-   * @returns {number} the side inset to use, in whole pixels.
-   */
-  var affordableInset = function (track) {
-    var column = document.querySelector(ANCHORS[2].selector)
-    if (column === null) return 0
-    var left = column.getBoundingClientRect().left
-    var needed = 0
-    var buttons = column.querySelectorAll('button')
-    for (var i = 0; i < buttons.length; i += 1) {
-      var box = buttons[i].getBoundingClientRect()
-      if (box.width === 0) continue
-      // Relative to the panel, so this reads the same whatever inset is
-      // currently applied — which is what makes it safe to measure in place
-      // rather than having to strip the inset off first.
-      needed = Math.max(needed, box.right - left)
-    }
-    if (needed === 0) return 0
-    var wanted = parseFloat(getComputedStyle(document.body).getPropertyValue('--lg-inset'))
-    var room = Math.floor((track - needed) / 2)
-    return Math.max(0, Math.min(isFinite(wanted) ? wanted : 0, room))
-  }
-
   var mark = function () {
     var first = getComputedStyle(frame).gridTemplateColumns.split(' ')[0]
     var width = parseFloat(first)
@@ -478,11 +473,9 @@ function watchLayout(frame) {
     // this does not understand, and quietly guessing "collapsed" would strip
     // the inset off a perfectly normal sidebar. Leave it alone instead.
     if (isFinite(width) && width > 0 && width < NARROW_PX) {
-      document.body.style.setProperty('--lg-inset-narrow', affordableInset(width) + 'px')
       document.body.setAttribute('data-lg-narrow', '')
     } else {
       document.body.removeAttribute('data-lg-narrow')
-      document.body.style.removeProperty('--lg-inset-narrow')
     }
   }
   /**

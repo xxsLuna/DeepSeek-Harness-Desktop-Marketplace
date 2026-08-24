@@ -138,18 +138,21 @@ re-measures once per session and settles about `2 × inset` narrower than before
 It does not accumulate across restarts — each boot starts from the app's own
 width — but `inset: 0` is there for anyone who wants every pixel back.
 
-**Collapsed, the side gap is measured rather than chosen.** The rail is only as
-wide as its icons, so it cannot simply be given the same inset: the collapsed
-track is 56px and the icons need 47 of it, and 8px a side leaves 40 and clips
-six buttons by 7px each. Picking a constant is a trap too — 4px fits with
-exactly 1px to spare, which is not a margin of safety but a bet on upstream
-never changing that offset, and it would be lost silently as clipped icons.
+**Collapsed, the side gap is painted rather than taken.** The rail is only as
+wide as its icons, and the box is what clips: the track is 56px, the icons
+occupy 11 to 47 of it, and `overflow: hidden` cuts the rest — so an 8px margin
+a side leaves 40 and takes 7px off six icons.
 
-So the browser half measures how much room the icons actually occupy and insets
-by half of whatever the track has left, capped at the value you set. In practice
-that lands on 3–4px, the rail floats on all four sides, and if the icons ever
-grow to fill it the gap shrinks to nothing on its own. Vertically it gets the
-full inset either way — the column is full height and has room to give. The state lives in an inline
+No margin both shows and fits. 4px a side is the most that clears, with 1px to
+spare, and 1px is what a fractional device pixel ratio or a focus ring eats.
+Measuring the leftover and splitting it lands in the same place less
+predictably: it produced a 1px gap, and a visible sideways twitch as the number
+settled mid-animation.
+
+So the box keeps its full width and the glass is drawn inset on a
+pseudo-element — icons at 11–47, glass at 8–48, comfortably clear. Nothing is
+clipped because nothing was narrowed. Vertically the box is inset as usual; the
+column is full height and has room to give there. The state lives in an inline
 `grid-template-columns` on the frame — no class, no attribute, nothing a
 selector can see — so the browser half watches for it and marks `body`, and the
 stylesheet keys off that mark.
