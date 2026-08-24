@@ -138,21 +138,24 @@ re-measures once per session and settles about `2 × inset` narrower than before
 It does not accumulate across restarts — each boot starts from the app's own
 width — but `inset: 0` is there for anyone who wants every pixel back.
 
-**Collapsed, the side gap is painted rather than taken.** The rail is only as
-wide as its icons, and the box is what clips: the track is 56px, the icons
-occupy 11 to 47 of it, and `overflow: hidden` cuts the rest — so an 8px margin
-a side leaves 40 and takes 7px off six icons.
+**Collapsed, the track is widened by the two gaps.** The rail is only as wide as
+its icons, so an inset taken out of it comes off them: the track is 56px, the
+icons occupy 11 to 47, and `overflow: hidden` cuts the rest — 8px a side leaves
+40 and takes 7px off six icons.
 
-No margin both shows and fits. 4px a side is the most that clears, with 1px to
-spare, and 1px is what a fractional device pixel ratio or a focus ring eats.
-Measuring the leftover and splitting it lands in the same place less
-predictably: it produced a 1px gap, and a visible sideways twitch as the number
-settled mid-animation.
+Widening is the fix, and it took three wrong ones to get there. Measuring the
+leftover and splitting it lands on 4px with 1px to spare, which a fractional
+device pixel ratio eats, and recomputes against a track that is still animating,
+so the panel visibly slid sideways as the number settled. Painting the gap on a
+pseudo-element instead of taking it fixed the clipping but left a 40px sliver,
+because the pill was drawn inside a rail that had not grown.
 
-So the box keeps its full width and the glass is drawn inset on a
-pseudo-element — icons at 11–47, glass at 8–48, comfortably clear. Nothing is
-clipped because nothing was narrowed. Vertically the box is inset as usual; the
-column is full height and has room to give there. The state lives in an inline
+Adding `2 × inset` to the collapsed track satisfies all of it at once: the panel
+takes its margin out of the layout rather than out of the icons, the visible
+pill is the 56px the app intended, nothing is narrowed so nothing clips, and no
+number is computed from a moving layout so nothing twitches. Only the first
+track is rewritten — the rest are copied through, because the third one is the
+details pane and is not always zero. The state lives in an inline
 `grid-template-columns` on the frame — no class, no attribute, nothing a
 selector can see — so the browser half watches for it and marks `body`, and the
 stylesheet keys off that mark.

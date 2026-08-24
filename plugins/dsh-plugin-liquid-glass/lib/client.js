@@ -294,49 +294,28 @@ function sheetFor(s) {
     // no selector can see, so the browser half watches for it and marks the
     // body — see `watchLayout`.
     //
-    // Vertically the box is inset as usual — the column is full height and has
-    // room to give. Horizontally it is NOT, and the glass is painted inset
-    // instead, on a pseudo-element.
+    // Collapsed, the track itself is widened by the two gaps — see `mark` — so
+    // the panel can take its margin out of the layout instead of out of the
+    // icons, and the visible pill stays the width the app intended.
     //
-    // The box cannot shrink sideways here, because the box is what clips. The
-    // collapsed track is 56px, the icons occupy 11 to 47 of it, and
-    // `overflow: hidden` cuts whatever is past the edge — so 8px a side leaves
-    // 40 and takes 7px off six icons. No margin both shows and fits: 4px a side
-    // is the most that clears, with 1px to spare, and 1px is what a fractional
-    // device pixel ratio or a focus ring eats. Measuring the leftover and
-    // splitting it was tried and lands in the same place less predictably — it
-    // produced a 1px gap, and a visible sideways twitch while the number
-    // settled mid-animation.
+    // Insetting without widening was tried three ways and none of them work.
+    // The box is what clips: the rail is 56px, the icons occupy 11 to 47 of it,
+    // and `overflow: hidden` cuts the rest, so 8px a side leaves 40 and takes
+    // 7px off six icons. Measuring the leftover and splitting it lands on 4px
+    // with 1px to spare — which a fractional device pixel ratio eats — and
+    // recomputes against a moving track, so the panel visibly slid sideways
+    // while the number settled. Painting the gap on a pseudo-element instead of
+    // taking it fixed the clipping but left a 40px sliver, because the pill was
+    // then drawn inside a rail that had not grown.
     //
-    // Painting solves it outright. The icons need 11–47, the glass is drawn at
-    // 8–48, and they sit comfortably inside it. Nothing is clipped because
-    // nothing was narrowed.
-    //
-    // `isolation: isolate` is what makes `z-index: -1` safe: without a stacking
-    // context of its own the pseudo sinks behind the frame's opaque background
-    // and disappears, and with one it stays behind the column's content and in
-    // front of the window. It costs nothing here — it would suppress a
-    // `backdrop-filter`, and this anchor deliberately has none.
-    'body[data-lg-narrow] ' + ANCHORS[2].selector + ' {',
-    '  margin: var(--lg-inset) 0 !important;',
-    '  position: relative !important;',
-    '  isolation: isolate !important;',
-    '  background: none !important;',
-    '  border-color: transparent !important;',
-    '  box-shadow: none !important;',
+    // Widening is the one that leaves every constraint satisfied: nothing is
+    // narrowed, so nothing clips; nothing is measured, so nothing moves
+    // mid-animation; and the pill is 56px with a real gap on both sides.
+    'body[data-lg-narrow] [class*="_frame"] {',
+    '  grid-template-columns: var(--lg-cols) !important;',
     '}',
-    'body[data-lg-narrow] ' + ANCHORS[2].selector + '::before {',
-    "  content: '' !important;",
-    '  position: absolute !important;',
-    '  inset: 0 var(--lg-inset) !important;',
-    '  z-index: -1 !important;',
-    '  pointer-events: none !important;',
-    '  border-radius: var(--lg-radius) !important;',
-    '  border: 1px solid var(--lg-edge) !important;',
-    '  border-top-color: transparent !important;',
-    '  background-color: color-mix(in srgb, var(--lg-surface) var(--lg-opacity), transparent) !important;',
-    '  background-image: linear-gradient(to bottom, var(--lg-sheen), transparent 40%) !important;',
-    '  box-shadow: var(--lg-shadow) !important;',
+    'body[data-lg-narrow] ' + ANCHORS[2].selector + ' {',
+    '  margin: var(--lg-inset) !important;',
     '}',
     // The app writes an explicit pixel width inline on the sidebar's inner root
     // — it is a resizable column, so JS owns that number — and that width is
@@ -467,15 +446,37 @@ function watchLayout(frame) {
   var settle = 0
 
   var mark = function () {
-    var first = getComputedStyle(frame).gridTemplateColumns.split(' ')[0]
-    var width = parseFloat(first)
+    // The INLINE value, not the computed one. The app writes its target here
+    // and the browser interpolates the computed value on the way to it, so the
+    // inline string is the settled answer from the first frame — reading the
+    // computed one meant reading a number mid-animation, which is what put a
+    // full-width sidebar into the collapsed state once already. It also breaks
+    // the loop that would otherwise form, since the rule below overrides the
+    // computed value with one derived from this.
+    var declared = frame.style.gridTemplateColumns
+    var tracks = declared === '' ? [] : declared.split(' ')
+    var width = parseFloat(tracks[0])
     // A track that is not a plain px value means the layout is doing something
     // this does not understand, and quietly guessing "collapsed" would strip
     // the inset off a perfectly normal sidebar. Leave it alone instead.
     if (isFinite(width) && width > 0 && width < NARROW_PX) {
+      // Widen the collapsed track by the two gaps the panel is about to take
+      // out of it. Without this the rail keeps the app's 56px and the inset
+      // eats it from both sides, leaving a 40px sliver; with it the visible
+      // pill is the width the app intended and the gaps come out of the layout
+      // instead of out of the icons.
+      //
+      // Only the first track is touched. The rest are copied through verbatim,
+      // because the third one is the details pane and is not always zero —
+      // rebuilding the whole template from a guess would close it.
+      var wanted = parseFloat(getComputedStyle(document.body).getPropertyValue('--lg-inset'))
+      var gap = isFinite(wanted) ? wanted : 0
+      tracks[0] = (width + gap * 2) + 'px'
+      document.body.style.setProperty('--lg-cols', tracks.join(' '))
       document.body.setAttribute('data-lg-narrow', '')
     } else {
       document.body.removeAttribute('data-lg-narrow')
+      document.body.style.removeProperty('--lg-cols')
     }
   }
   /**
